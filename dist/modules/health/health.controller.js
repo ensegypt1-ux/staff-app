@@ -13,6 +13,7 @@ exports.HealthController = void 0;
 const common_1 = require("@nestjs/common");
 const terminus_1 = require("@nestjs/terminus");
 const public_decorator_1 = require("../../common/decorators/public.decorator");
+const throttle_decorators_1 = require("../../common/decorators/throttle.decorators");
 let HealthController = class HealthController {
     constructor(health) {
         this.health = health;
@@ -27,6 +28,7 @@ let HealthController = class HealthController {
 exports.HealthController = HealthController;
 __decorate([
     (0, public_decorator_1.Public)(),
+    (0, throttle_decorators_1.HealthThrottle)(),
     (0, common_1.Get)('health'),
     (0, terminus_1.HealthCheck)(),
     __metadata("design:type", Function),
@@ -35,6 +37,7 @@ __decorate([
 ], HealthController.prototype, "check", null);
 __decorate([
     (0, public_decorator_1.Public)(),
+    (0, throttle_decorators_1.HealthThrottle)(),
     (0, common_1.Get)('health/live'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),

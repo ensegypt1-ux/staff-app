@@ -52,6 +52,11 @@ __decorate([
 ], EnvironmentVariables.prototype, "SECRET_KEY", void 0);
 __decorate([
     (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "JWT_ACCESS_SECRET", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
     (0, class_validator_1.IsInt)(),
     (0, class_validator_1.Min)(-120),
     (0, class_validator_1.Max)(120),
@@ -68,6 +73,47 @@ __decorate([
     (0, class_validator_1.Min)(1000),
     __metadata("design:type", Number)
 ], EnvironmentVariables.prototype, "UPSTREAM_TIMEOUT_MS", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)(),
+    (0, class_validator_1.Min)(0),
+    (0, class_validator_1.Max)(5),
+    __metadata("design:type", Number)
+], EnvironmentVariables.prototype, "TRUST_PROXY_HOPS", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)(),
+    (0, class_validator_1.Min)(1000),
+    __metadata("design:type", Number)
+], EnvironmentVariables.prototype, "THROTTLE_TTL_MS", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)(),
+    (0, class_validator_1.Min)(1),
+    __metadata("design:type", Number)
+], EnvironmentVariables.prototype, "THROTTLE_LIMIT", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)(),
+    (0, class_validator_1.Min)(1000),
+    __metadata("design:type", Number)
+], EnvironmentVariables.prototype, "THROTTLE_AUTH_TTL_MS", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsInt)(),
+    (0, class_validator_1.Min)(1),
+    __metadata("design:type", Number)
+], EnvironmentVariables.prototype, "THROTTLE_AUTH_LIMIT", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "REQUEST_JSON_LIMIT", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "REQUEST_URLENCODED_LIMIT", void 0);
 function validateEnv(config) {
     const validated = (0, class_transformer_1.plainToInstance)(EnvironmentVariables, config, {
         enableImplicitConversion: true,
@@ -77,6 +123,20 @@ function validateEnv(config) {
         throw new Error(`Environment validation failed:\n${errors
             .map((e) => Object.values(e.constraints ?? {}).join(', '))
             .join('\n')}`);
+    }
+    const nodeEnv = validated.NODE_ENV;
+    const productionIssues = [];
+    if (nodeEnv === 'production') {
+        const jwt = validated.JWT_ACCESS_SECRET?.trim() ?? '';
+        if (jwt.length < 32) {
+            productionIssues.push('JWT_ACCESS_SECRET is required in production (min 32 characters)');
+        }
+        if ((validated.CORS_ORIGINS ?? '').trim() === '*') {
+            productionIssues.push('CORS_ORIGINS=* is forbidden in production; set an explicit allowlist');
+        }
+    }
+    if (productionIssues.length > 0) {
+        throw new Error(`Environment validation failed:\n${productionIssues.join('\n')}`);
     }
     return validated;
 }

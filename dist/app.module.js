@@ -10,10 +10,12 @@ exports.AppModule = void 0;
 const common_1 = require("@nestjs/common");
 const config_1 = require("@nestjs/config");
 const core_1 = require("@nestjs/core");
+const throttler_1 = require("@nestjs/throttler");
 const configuration_1 = require("./config/configuration");
 const env_validation_1 = require("./config/env.validation");
 const upstream_exception_filter_1 = require("./common/filters/upstream-exception.filter");
 const jwt_auth_guard_1 = require("./common/guards/jwt-auth.guard");
+const staff_only_guard_1 = require("./common/guards/staff-only.guard");
 const ens_backend_module_1 = require("./infrastructure/ens-backend/ens-backend.module");
 const health_module_1 = require("./modules/health/health.module");
 const staff_module_1 = require("./modules/staff/staff.module");
@@ -28,6 +30,17 @@ exports.AppModule = AppModule = __decorate([
                 load: [configuration_1.default],
                 validate: env_validation_1.validateEnv,
             }),
+            throttler_1.ThrottlerModule.forRootAsync({
+                imports: [config_1.ConfigModule],
+                inject: [config_1.ConfigService],
+                useFactory: (config) => [
+                    {
+                        name: 'default',
+                        ttl: config.get('throttleTtlMs') ?? 60_000,
+                        limit: config.get('throttleLimit') ?? 120,
+                    },
+                ],
+            }),
             ens_backend_module_1.EnsBackendModule,
             health_module_1.HealthModule,
             staff_module_1.StaffModule,
@@ -36,6 +49,14 @@ exports.AppModule = AppModule = __decorate([
             {
                 provide: core_1.APP_GUARD,
                 useClass: jwt_auth_guard_1.JwtAuthGuard,
+            },
+            {
+                provide: core_1.APP_GUARD,
+                useClass: staff_only_guard_1.StaffOnlyGuard,
+            },
+            {
+                provide: core_1.APP_GUARD,
+                useClass: throttler_1.ThrottlerGuard,
             },
             {
                 provide: core_1.APP_FILTER,

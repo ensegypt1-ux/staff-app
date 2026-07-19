@@ -20,11 +20,16 @@ Default listen port: **3010**.
 | `NODE_ENV` | Yes | `development` / `production` |
 | `ENS_BACKEND_URL` | Yes | Express base URL (no trailing slash) |
 | `ASSET_PUBLIC_BASE_URL` | Yes | Public base for rewriting asset URLs in JSON |
-| `CORS_ORIGINS` | Yes | `*` or comma-separated origins |
+| `CORS_ORIGINS` | Yes | `*` in development only; explicit allowlist in production |
 | `SECRET_KEY` | Yes | HMAC secret for `x-api-key` on legacy `/api/*` calls |
-| `API_KEY_TIME_OFFSET_SECONDS` | No | Clock skew offset for API key (default `30`) |
+| `JWT_ACCESS_SECRET` | Yes in production (min 32) | Same as Express — verifies staff Bearer JWTs (HS256) |
+| `TRUST_PROXY_HOPS` | No | Reverse-proxy hops for client IP (0–5; prod default 1) |
+| `THROTTLE_*` | No | Global / auth / health rate limits |
+| `API_KEY_TIME_OFFSET_SECONDS` | No | Clock skew offset for API key (default `0`) |
 | `UPSTREAM_DEBUG_LOG` | No | Log upstream requests (`true` / `false`) |
 | `UPSTREAM_TIMEOUT_MS` | No | Axios timeout (default `30000`) |
+
+**Security:** Protected routes require a cryptographically verified staff JWT. Login and health are public. Client `menuId` cannot override the JWT menu scope.
 
 See [docs/upstream-route-map.md](docs/upstream-route-map.md) for BFF → Express route mapping.
 
@@ -55,7 +60,9 @@ Staff app V1 QA checklist (table + **online orders**): [../ens-staff-app/docs/v1
    - `NODE_ENV=production`
    - `ENS_BACKEND_URL=https://ensapi.ensbot.net`
    - `SECRET_KEY` — same value as the mobile gateway (HMAC for Express `x-api-key`)
-   - `CORS_ORIGINS=*` or your app origins
+   - `JWT_ACCESS_SECRET` — same as Express / Owner Gateway (min 32 characters)
+   - `CORS_ORIGINS` — explicit allowlist (`*` is rejected in production)
+   - `TRUST_PROXY_HOPS` — match your reverse-proxy hop count
    - `API_KEY_TIME_OFFSET_SECONDS=0` (clock sync handles skew automatically)
 
 2. Build and run:

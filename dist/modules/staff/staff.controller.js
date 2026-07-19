@@ -15,7 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StaffController = void 0;
 const common_1 = require("@nestjs/common");
 const public_decorator_1 = require("../../common/decorators/public.decorator");
-const jwt_auth_guard_1 = require("../../common/guards/jwt-auth.guard");
+const throttle_decorators_1 = require("../../common/decorators/throttle.decorators");
 const proxy_response_util_1 = require("../../common/utils/proxy-response.util");
 const ens_http_service_1 = require("../../infrastructure/ens-backend/ens-http.service");
 const asset_url_service_1 = require("../../infrastructure/storage/asset-url.service");
@@ -104,7 +104,7 @@ let StaffController = class StaffController {
     }
     async patchOrderItems(req, res, id, body) {
         const staffCallId = Number(id);
-        const menuId = this.ordersFlow.parseMenuId({}, body);
+        const menuId = this.ordersFlow.resolveMenuId(req, {}, body);
         const activityLogId = Number(body.activityLogId ?? 0) || undefined;
         const items = body.items;
         const result = await this.ordersFlow.patchOrderItems(req, staffCallId, menuId, items, activityLogId);
@@ -118,7 +118,7 @@ let StaffController = class StaffController {
     async postOrderAction(req, res, id, body) {
         const staffCallId = Number(id);
         const action = String(body.action ?? '');
-        const menuId = this.ordersFlow.parseMenuId({}, body);
+        const menuId = this.ordersFlow.resolveMenuId(req, {}, body);
         const activityLogId = Number(body.activityLogId ?? 0) || undefined;
         const result = await this.ordersFlow.postOrderAction(req, staffCallId, action, menuId, activityLogId);
         if (result.status >= 400) {
@@ -139,6 +139,7 @@ let StaffController = class StaffController {
 exports.StaffController = StaffController;
 __decorate([
     (0, public_decorator_1.Public)(),
+    (0, throttle_decorators_1.HealthThrottle)(),
     (0, common_1.Get)('health'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
@@ -146,6 +147,7 @@ __decorate([
 ], StaffController.prototype, "health", null);
 __decorate([
     (0, public_decorator_1.Public)(),
+    (0, throttle_decorators_1.AuthThrottle)(),
     (0, common_1.Post)('auth/login'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Res)()),
@@ -246,7 +248,6 @@ __decorate([
 ], StaffController.prototype, "postOrderAction", null);
 exports.StaffController = StaffController = __decorate([
     (0, common_1.Controller)('staff/v1'),
-    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     __metadata("design:paramtypes", [ens_http_service_1.EnsHttpService,
         asset_url_service_1.AssetUrlService,
         staff_orders_flow_service_1.StaffOrdersFlowService])

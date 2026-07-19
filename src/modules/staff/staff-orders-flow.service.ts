@@ -13,8 +13,8 @@ import { logUpstreamDenial, normalizeStaffUpstreamError, rejectUpstreamListResul
 import {
   StaffJobRole,
   normalizeStaffJobRole,
-  staffJobRoleFromRequest,
 } from './staff-job-role.util';
+import { resolveStaffMenuId } from './staff-menu-scope.util';
 import {
   StaffOrderChannel,
   StaffOrderPresenterService,
@@ -39,8 +39,11 @@ import {
   applyStaffOrderSelfAcceptRules,
   shouldBlockWaiterSelfAccept,
 } from './staff-order-self-accept.util';
+import { getAuthIdentity } from '../../common/utils/jwt-payload.util';
 
 type Scope = 'active' | 'history';
+
+const STAFF_JOB_ROLE_CACHE = Symbol('staffJobRoleCache');
 
 @Injectable()
 export class StaffOrdersFlowService {
@@ -52,89 +55,60 @@ export class StaffOrdersFlowService {
     private readonly tableOrderCreators: StaffTableOrderCreatorRegistry,
   ) {}
 
-  parseMenuId(
-    query: Record<string, unknown>,
+  /**
+   * Authoritative menu scope from verified JWT.
+   * Optional client menuId must match; mismatches throw ForbiddenException.
+   */
+  resolveMenuId(
+    req: Request,
+    query: Record<string, unknown> = {},
     body?: Record<string, unknown>,
   ): number {
-    const raw = body?.menuId ?? query.menuId;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    return resolveStaffMenuId(req, query, body);
   }
 
-  async resolveMenuId(
-    req: Request,
-    query: Record<string, unknown>,
-  ): Promise<number> {
-    const fromQuery = this.parseMenuId(query);
-    if (fromQuery > 0) {
-      return fromQuery;
-    }
+  /**
+   * Job role from verified upstream `/staff-auth/me` only.
+   * Never inferred from unsigned JWT claims.
+   */
+  async resolveRole(req: Request): Promise<StaffJobRole> {
+    const cached = (req as Request & { [STAFF_JOB_ROLE_CACHE]?: StaffJobRole })[
+      STAFF_JOB_ROLE_CACHE
+    ];
+    if (cached) return cached;
 
+    let role: StaffJobRole = 'waiter';
     try {
       const me = await this.ensHttp.proxy({
         method: 'GET',
         path: 'staff-auth/me',
         req,
       });
-      if (me.status >= 400) {
-        return 0;
-      }
-      const payload = me.data as Record<string, unknown> | null;
-      const menu = payload?.menu;
-      if (menu && typeof menu === 'object') {
-        const id = Number((menu as Record<string, unknown>).id ?? 0);
-        if (Number.isFinite(id) && id > 0) {
-          return id;
+      const staff = (me.data as Record<string, unknown> | null)?.staff;
+      if (staff && typeof staff === 'object') {
+        const normalized = normalizeStaffJobRole(
+          (staff as Record<string, unknown>).role,
+        );
+        if (normalized !== 'unknown') {
+          role = normalized;
         }
       }
     } catch {
-      /* fall through */
+      /* fall through to waiter */
     }
 
-    return 0;
+    Object.defineProperty(req, STAFF_JOB_ROLE_CACHE, {
+      value: role,
+      writable: false,
+      enumerable: false,
+      configurable: true,
+    });
+    return role;
   }
 
-  async resolveRole(req: Request): Promise<StaffJobRole> {
-    const fromJwt = staffJobRoleFromRequest(req);
-    if (fromJwt === 'cashier') return 'cashier';
-
-    try {
-      const me = await this.ensHttp.proxy({
-        method: 'GET',
-        path: 'staff-auth/me',
-        req,
-      });
-      const staff = (me.data as Record<string, unknown> | null)?.staff;
-      if (staff && typeof staff === 'object') {
-        const role = normalizeStaffJobRole(
-          (staff as Record<string, unknown>).role,
-        );
-        if (role !== 'unknown') return role;
-      }
-    } catch {
-      /* fall through */
-    }
-
-    return fromJwt === 'unknown' ? 'waiter' : fromJwt;
-  }
-
-  async resolveStaffId(req: Request): Promise<number> {
-    try {
-      const me = await this.ensHttp.proxy({
-        method: 'GET',
-        path: 'staff-auth/me',
-        req,
-      });
-      if (me.status >= 400) return 0;
-      const staff = (me.data as Record<string, unknown> | null)?.staff;
-      if (staff && typeof staff === 'object') {
-        const id = Number((staff as Record<string, unknown>).id ?? 0);
-        if (Number.isFinite(id) && id > 0) return id;
-      }
-    } catch {
-      /* fall through */
-    }
-    return 0;
+  /** Staff id from verified JWT identity (`MenuStaff.id`). */
+  resolveStaffId(req: Request): number {
+    return getAuthIdentity(req)?.userId ?? 0;
   }
 
   private async enrichEntryForStaff(
@@ -218,7 +192,7 @@ export class StaffOrdersFlowService {
   > {
     const role = await this.resolveRole(req);
     const menuId =
-      this.parseMenuId(query) || (await this.resolveMenuId(req, query));
+      this.resolveMenuId(req, query);
     const activityLogId = Number(query.activityLogId ?? 0);
 
     if (menuId <= 0 || staffCallId <= 0) {
@@ -557,7 +531,7 @@ export class StaffOrdersFlowService {
     }
 
     const menuId =
-      this.parseMenuId({}, body) || (await this.resolveMenuId(req, body));
+      this.resolveMenuId(req, {}, body);
     const tableNumber = String(body.tableNumber ?? '').trim();
     const items = body.items;
 

@@ -9,10 +9,9 @@ export declare class StaffOrdersFlowService {
     private readonly tableOrderCreators;
     private readonly logger;
     constructor(ensHttp: EnsHttpService, presenter: StaffOrderPresenterService, tableOrderCreators: StaffTableOrderCreatorRegistry);
-    parseMenuId(query: Record<string, unknown>, body?: Record<string, unknown>): number;
-    resolveMenuId(req: Request, query: Record<string, unknown>): Promise<number>;
+    resolveMenuId(req: Request, query?: Record<string, unknown>, body?: Record<string, unknown>): number;
     resolveRole(req: Request): Promise<StaffJobRole>;
-    resolveStaffId(req: Request): Promise<number>;
+    resolveStaffId(req: Request): number;
     private enrichEntryForStaff;
     private enrichEntriesForStaff;
     listOrders(req: Request, query: Record<string, unknown>): Promise<EnsHttpResult>;

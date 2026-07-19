@@ -8,11 +8,10 @@ import {
   Query,
   Req,
   Res,
-  UseGuards,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Public } from '../../common/decorators/public.decorator';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { AuthThrottle, HealthThrottle } from '../../common/decorators/throttle.decorators';
 import {
   sendProxyResponse,
   STAFF_JOB_ROLE_HEADER,
@@ -27,9 +26,9 @@ import { StaffPresentedListResult } from './staff-order-presenter.service';
 
 /**
  * Ensmenu Staff app — auth and order operations via Express upstream.
+ * Auth: global JwtAuthGuard + StaffOnlyGuard (login/health are @Public).
  */
 @Controller('staff/v1')
-@UseGuards(JwtAuthGuard)
 export class StaffController {
   constructor(
     private readonly ensHttp: EnsHttpService,
@@ -38,12 +37,14 @@ export class StaffController {
   ) {}
 
   @Public()
+  @HealthThrottle()
   @Get('health')
   health() {
     return { status: 'ok', service: 'ensmenu-staff-bff' };
   }
 
   @Public()
+  @AuthThrottle()
   @Post('auth/login')
   async login(
     @Req() req: Request,
@@ -195,7 +196,7 @@ export class StaffController {
     @Body() body: Record<string, unknown>,
   ) {
     const staffCallId = Number(id);
-    const menuId = this.ordersFlow.parseMenuId({}, body);
+    const menuId = this.ordersFlow.resolveMenuId(req, {}, body);
     const activityLogId = Number(body.activityLogId ?? 0) || undefined;
     const items = body.items;
 
@@ -233,7 +234,7 @@ export class StaffController {
   ) {
     const staffCallId = Number(id);
     const action = String(body.action ?? '');
-    const menuId = this.ordersFlow.parseMenuId({}, body);
+    const menuId = this.ordersFlow.resolveMenuId(req, {}, body);
     const activityLogId = Number(body.activityLogId ?? 0) || undefined;
     const result = await this.ordersFlow.postOrderAction(
       req,

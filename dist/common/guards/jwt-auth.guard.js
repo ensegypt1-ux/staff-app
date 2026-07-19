@@ -11,11 +11,14 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.JwtAuthGuard = void 0;
 const common_1 = require("@nestjs/common");
+const config_1 = require("@nestjs/config");
 const core_1 = require("@nestjs/core");
 const public_decorator_1 = require("../decorators/public.decorator");
+const jwt_payload_util_1 = require("../utils/jwt-payload.util");
 let JwtAuthGuard = class JwtAuthGuard {
-    constructor(reflector) {
+    constructor(reflector, configService) {
         this.reflector = reflector;
+        this.configService = configService;
     }
     canActivate(context) {
         const isPublic = this.reflector.getAllAndOverride(public_decorator_1.IS_PUBLIC_KEY, [
@@ -25,24 +28,24 @@ let JwtAuthGuard = class JwtAuthGuard {
         if (isPublic) {
             return true;
         }
-        const request = context
-            .switchToHttp()
-            .getRequest();
-        const authorization = request.headers.authorization;
-        if (typeof authorization !== 'string' ||
-            !authorization.startsWith('Bearer ')) {
+        const request = context.switchToHttp().getRequest();
+        const token = (0, jwt_payload_util_1.extractBearerToken)(request);
+        if (!token) {
             throw new common_1.UnauthorizedException({
                 error: 'Authentication required',
                 errorAr: 'مطلوب تسجيل الدخول',
                 code: 'AUTH_REQUIRED',
             });
         }
+        const identity = (0, jwt_payload_util_1.verifyAccessToken)(token, this.configService);
+        (0, jwt_payload_util_1.attachAuthIdentity)(request, identity);
         return true;
     }
 };
 exports.JwtAuthGuard = JwtAuthGuard;
 exports.JwtAuthGuard = JwtAuthGuard = __decorate([
     (0, common_1.Injectable)(),
-    __metadata("design:paramtypes", [core_1.Reflector])
+    __metadata("design:paramtypes", [core_1.Reflector,
+        config_1.ConfigService])
 ], JwtAuthGuard);
 //# sourceMappingURL=jwt-auth.guard.js.map
