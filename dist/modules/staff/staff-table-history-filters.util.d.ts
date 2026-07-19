@@ -1,7 +1,6 @@
 import { StaffPresentedListResult, StaffPresentedOrderEntry } from './staff-order-presenter.service';
-import { StaffJobRole } from './staff-job-role.util';
+import { StaffMappedCapabilities, StaffResolvedAuth } from './staff-capability.mapper';
 import { StaffOrderChannel } from './staff-order-channel.util';
-import { StaffOrderPresenterService } from './staff-order-presenter.service';
 export type TableHistoryDateRange = {
     dateFrom: string;
     dateTo: string;
@@ -22,12 +21,12 @@ export declare function paginatePresentedEntries(entries: StaffPresentedOrderEnt
 export declare const TABLE_HISTORY_MAX_SCAN_ROWS = 500;
 export declare function dedupeEntriesByStaffCallId(entries: StaffPresentedOrderEntry[]): StaffPresentedOrderEntry[];
 export declare function buildTableHistoryListResult(input: {
-    role: StaffJobRole;
+    auth: StaffResolvedAuth;
     channel: StaffOrderChannel;
     scope: 'history';
     entries: StaffPresentedOrderEntry[];
     page: number;
     limit: number;
     dateRange: TableHistoryDateRange;
-    capabilities: ReturnType<StaffOrderPresenterService['capabilitiesFor']>;
+    capabilities: StaffMappedCapabilities;
 }): StaffPresentedListResult;

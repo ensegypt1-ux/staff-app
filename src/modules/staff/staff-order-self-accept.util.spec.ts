@@ -1,5 +1,13 @@
-import { applyStaffOrderSelfAcceptRules, shouldBlockWaiterSelfAccept } from './staff-order-self-accept.util';
+import {
+  applyStaffOrderSelfAcceptRules,
+  shouldBlockStaffSelfAccept,
+} from './staff-order-self-accept.util';
 import { StaffPresentedOrderEntry } from './staff-order-presenter.service';
+import {
+  authFromPermissions,
+  cashierAuth,
+  waiterAuth,
+} from './staff-auth.fixtures';
 
 function baseEntry(
   overrides: Partial<StaffPresentedOrderEntry> = {},
@@ -42,48 +50,65 @@ function baseEntry(
   };
 }
 
-describe('shouldBlockWaiterSelfAccept', () => {
-  it('blocks waiter accepting own staff-created pending table order', () => {
+describe('shouldBlockStaffSelfAccept', () => {
+  it('blocks confirm-without-deliver on own staff-created pending table order', () => {
     expect(
-      shouldBlockWaiterSelfAccept({
+      shouldBlockStaffSelfAccept({
         channel: 'table',
         status: 'pending',
         createdByStaffId: 77,
-        role: 'waiter',
+        auth: waiterAuth(),
         currentStaffId: 77,
       }),
     ).toBe(true);
   });
 
-  it('does not block cashier on same order', () => {
+  it('does not block when orders:deliver is present (cashier shape)', () => {
     expect(
-      shouldBlockWaiterSelfAccept({
+      shouldBlockStaffSelfAccept({
         channel: 'table',
         status: 'pending',
         createdByStaffId: 77,
-        role: 'cashier',
-        currentStaffId: 78,
+        auth: cashierAuth(),
+        currentStaffId: 77,
       }),
     ).toBe(false);
   });
 
   it('does not block guest orders without creator id', () => {
     expect(
-      shouldBlockWaiterSelfAccept({
+      shouldBlockStaffSelfAccept({
         channel: 'table',
         status: 'pending',
         createdByStaffId: null,
-        role: 'waiter',
+        auth: waiterAuth(),
         currentStaffId: 77,
+      }),
+    ).toBe(false);
+  });
+
+  it('custom confirm+deliver is not blocked', () => {
+    const auth = authFromPermissions([
+      'orders:view',
+      'orders:confirm',
+      'orders:deliver',
+    ]);
+    expect(
+      shouldBlockStaffSelfAccept({
+        channel: 'table',
+        status: 'pending',
+        createdByStaffId: 5,
+        auth,
+        currentStaffId: 5,
       }),
     ).toBe(false);
   });
 });
 
 describe('applyStaffOrderSelfAcceptRules', () => {
-  it('removes accept action and sets waiting flag for creator waiter', () => {
+  it('removes accept action and sets waiting flag for creator without deliver', () => {
     const result = applyStaffOrderSelfAcceptRules(baseEntry(), {
-      role: 'waiter',
+      auth: waiterAuth(),
       currentStaffId: 77,
       createdByStaffId: 77,
     });
@@ -96,9 +121,9 @@ describe('applyStaffOrderSelfAcceptRules', () => {
     expect(result.canEditItems).toBe(true);
   });
 
-  it('leaves accept for other waiters on staff-created orders', () => {
+  it('leaves accept for other staff on staff-created orders', () => {
     const result = applyStaffOrderSelfAcceptRules(baseEntry(), {
-      role: 'waiter',
+      auth: waiterAuth(),
       currentStaffId: 99,
       createdByStaffId: 77,
     });

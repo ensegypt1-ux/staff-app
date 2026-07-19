@@ -1,6 +1,6 @@
 # Ensmenu Staff BFF
 
-Standalone NestJS backend-for-frontend for the ENS Menu **Staff** Flutter app. It proxies staff auth and order flows to the legacy Express API (`ENS_BACKEND_URL/api/*`), enriches order payloads for the mobile client, and applies role-based routing (waiter vs cashier).
+Standalone NestJS backend-for-frontend for the ENS Menu **Staff** Flutter app. It proxies staff auth and order flows to the Express API (`ENS_BACKEND_URL/api/*`), enriches order payloads for the mobile client, and authorizes actions from Express `/staff-auth/me` **`permissions[]`** (not legacy waiter/cashier role strings).
 
 ## Run locally
 
@@ -29,9 +29,28 @@ Default listen port: **3010**.
 | `UPSTREAM_DEBUG_LOG` | No | Log upstream requests (`true` / `false`) |
 | `UPSTREAM_TIMEOUT_MS` | No | Axios timeout (default `30000`) |
 
-**Security:** Protected routes require a cryptographically verified staff JWT. Login and health are public. Client `menuId` cannot override the JWT menu scope.
+**Security:** Protected routes require a cryptographically verified staff JWT. Login and health are public. Client `menuId` cannot override the JWT menu scope. Product capabilities come from verified upstream `permissions[]`.
 
 See [docs/upstream-route-map.md](docs/upstream-route-map.md) for BFF → Express route mapping.
+
+## Authorization model
+
+1. JWT proves `role=staff` and menu scope (`menuId`).
+2. BFF loads `GET /api/staff-auth/me` once per request (`resolveStaffAuth`).
+3. Decisions use `permissions[]` only (`orders:view`, `orders:confirm`, `orders:prepare`, `delivery:view`, …).
+4. `staffJobRole` remains as **deprecated display metadata** for older Flutter clients.
+
+| Permission | Effect in Staff BFF |
+|------------|---------------------|
+| `orders:view` | Table order lists/detail/history via `staff-auth/table-calls` |
+| `orders:confirm` / `orders:cancel` | Accept / reject |
+| `orders:edit_items` | Item PATCH (pending/confirmed) |
+| `orders:prepare` | Prepare → `PATCH staff-auth/table-calls/:id/prepare` |
+| `orders:deliver` | Mark delivered |
+| `orders:complete` | Exposed in capabilities (completion UX) |
+| `delivery:view` | Delivery lists/detail via `menus/:menuId/activity-logs` |
+
+Self-accept block: `orders:confirm` **and not** `orders:deliver` on own staff-created pending table orders.
 
 ## Upstream mapping (summary)
 
@@ -40,11 +59,12 @@ See [docs/upstream-route-map.md](docs/upstream-route-map.md) for BFF → Express
 | `POST /staff/v1/auth/login` | `POST /api/staff-auth/login` |
 | `GET /staff/v1/auth/me` | `GET /api/staff-auth/me` |
 | `POST /staff/v1/auth/logout` | `POST /api/staff-auth/logout` |
-| `GET /staff/v1/capabilities` | BFF-computed from role |
-| `GET /staff/v1/orders` | Waiter: `GET /api/staff-auth/table-calls` or `.../history`; Cashier: `GET /api/menus/:menuId/activity-logs` |
-| `GET /staff/v1/orders/:id` | `GET /api/menus/:menuId/activity-logs/:id` and/or `GET /api/staff-auth/table-calls/:id` |
-| `POST /staff/v1/orders/:id/actions` | Waiter: `PATCH /api/staff-auth/table-calls/:id/status`; Cashier: `POST /api/menus/:menuId/activity-logs/:id/actions` |
-| `PATCH /staff/v1/orders/:id/items` | `PATCH /api/staff-auth/table-calls/:id/items` (table orders, pending/confirmed) |
+| `GET /staff/v1/capabilities` | BFF-mapped from `/staff-auth/me` permissions |
+| `GET /staff/v1/orders` (table) | `GET /api/staff-auth/table-calls` (+ `/history`) |
+| `GET /staff/v1/orders` (delivery) | `GET /api/menus/:menuId/activity-logs` when `delivery:view` |
+| `GET /staff/v1/orders/:id` | Table-calls and/or activity-logs (by channel + permissions) |
+| `POST /staff/v1/orders/:id/actions` | Confirm/cancel → table-calls status; prepare → table-calls prepare; delivery actions → activity-logs |
+| `PATCH /staff/v1/orders/:id/items` | `PATCH /api/staff-auth/table-calls/:id/items` |
 | `GET /staff/v1/menu/catalog` | `GET /api/public/menu/:slug/catalog` (slug from staff `/me`) |
 | `GET /health/live` | Local liveness |
 | `GET /health` | Terminus health |

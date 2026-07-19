@@ -1,8 +1,9 @@
-import { StaffJobRole } from './staff-job-role.util';
+import { StaffMappedCapabilities, StaffResolvedAuth } from './staff-capability.mapper';
 import { StaffOrderActionSpec } from './staff-order-actions.util';
 import { StaffOrderStatus } from './staff-order-status.util';
 import { StaffOrderChannel } from './staff-order-channel.util';
 import { StaffOrderActionDetail } from './staff-order-action-details.util';
+import { StaffJobRole } from './staff-job-role.util';
 export type { StaffOrderChannel };
 export type StaffPresentedOrderItem = {
     menuItemId?: number | null;
@@ -43,16 +44,12 @@ export type StaffPresentedOrderEntry = {
     createdByStaffId: number | null;
     waitingForCashierApproval: boolean;
 };
-export type StaffOrderCapabilities = {
-    staffJobRole: StaffJobRole;
-    canProcessOrders: boolean;
-    canViewDelivery: boolean;
-    canViewHistory: boolean;
-    canEditItems: boolean;
-    channels: StaffOrderChannel[];
-};
+export type StaffOrderCapabilities = StaffMappedCapabilities;
 export type StaffPresentedListResult = {
     staffJobRole: StaffJobRole;
+    permissions: string[];
+    roleName: string | null;
+    roleId: number | null;
     channel: StaffOrderChannel;
     scope: 'active' | 'history';
     entries: StaffPresentedOrderEntry[];
@@ -60,7 +57,7 @@ export type StaffPresentedListResult = {
     page: number;
     limit: number;
     totalPages: number;
-    capabilities: StaffOrderCapabilities;
+    capabilities: StaffMappedCapabilities;
     filters?: {
         dateFrom: string;
         dateTo: string;
@@ -68,18 +65,21 @@ export type StaffPresentedListResult = {
 };
 export type StaffPresentedDetailResult = {
     staffJobRole: StaffJobRole;
+    permissions: string[];
+    roleName: string | null;
+    roleId: number | null;
     entry: StaffPresentedOrderEntry;
     actions: Array<Record<string, unknown>>;
-    capabilities: StaffOrderCapabilities;
+    capabilities: StaffMappedCapabilities;
 };
 export declare class StaffOrderPresenterService {
-    capabilitiesFor(role: StaffJobRole): StaffOrderCapabilities;
-    presentTableCallRow(raw: Record<string, unknown>, role: StaffJobRole): StaffPresentedOrderEntry | null;
-    mergeCallHydration(entry: StaffPresentedOrderEntry, call: Record<string, unknown>, role: StaffJobRole): StaffPresentedOrderEntry;
+    capabilitiesFor(auth: StaffResolvedAuth): StaffMappedCapabilities;
+    presentTableCallRow(raw: Record<string, unknown>, auth: StaffResolvedAuth): StaffPresentedOrderEntry | null;
+    mergeCallHydration(entry: StaffPresentedOrderEntry, call: Record<string, unknown>, auth: StaffResolvedAuth): StaffPresentedOrderEntry;
     private mergeEntryFields;
     private pickString;
-    presentListRow(raw: Record<string, unknown>, role: StaffJobRole, channel: StaffOrderChannel): StaffPresentedOrderEntry | null;
-    presentDetail(raw: Record<string, unknown>, role: StaffJobRole): StaffPresentedOrderEntry | null;
+    presentListRow(raw: Record<string, unknown>, auth: StaffResolvedAuth, channel: StaffOrderChannel): StaffPresentedOrderEntry | null;
+    presentDetail(raw: Record<string, unknown>, auth: StaffResolvedAuth): StaffPresentedOrderEntry | null;
     private buildEntry;
     filterByScope(entries: StaffPresentedOrderEntry[], scope: 'active' | 'history'): StaffPresentedOrderEntry[];
     applyListScope(entry: StaffPresentedOrderEntry, scope: 'active' | 'history'): StaffPresentedOrderEntry;

@@ -106,7 +106,10 @@ function buildTableHistoryListResult(input) {
     const unique = dedupeEntriesByStaffCallId(input.entries);
     const paged = paginatePresentedEntries(unique, input.page, input.limit);
     return {
-        staffJobRole: input.role,
+        staffJobRole: input.auth.staffJobRole,
+        permissions: input.auth.permissions,
+        roleName: input.auth.roleName,
+        roleId: input.auth.roleId,
         channel: input.channel,
         scope: input.scope,
         entries: paged.entries,

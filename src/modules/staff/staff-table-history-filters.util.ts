@@ -2,9 +2,11 @@ import {
   StaffPresentedListResult,
   StaffPresentedOrderEntry,
 } from './staff-order-presenter.service';
-import { StaffJobRole } from './staff-job-role.util';
+import {
+  StaffMappedCapabilities,
+  StaffResolvedAuth,
+} from './staff-capability.mapper';
 import { StaffOrderChannel } from './staff-order-channel.util';
-import { StaffOrderPresenterService } from './staff-order-presenter.service';
 
 export type TableHistoryDateRange = {
   dateFrom: string;
@@ -138,20 +140,23 @@ export function dedupeEntriesByStaffCallId(
 }
 
 export function buildTableHistoryListResult(input: {
-  role: StaffJobRole;
+  auth: StaffResolvedAuth;
   channel: StaffOrderChannel;
   scope: 'history';
   entries: StaffPresentedOrderEntry[];
   page: number;
   limit: number;
   dateRange: TableHistoryDateRange;
-  capabilities: ReturnType<StaffOrderPresenterService['capabilitiesFor']>;
+  capabilities: StaffMappedCapabilities;
 }): StaffPresentedListResult {
   const unique = dedupeEntriesByStaffCallId(input.entries);
   const paged = paginatePresentedEntries(unique, input.page, input.limit);
 
   return {
-    staffJobRole: input.role,
+    staffJobRole: input.auth.staffJobRole,
+    permissions: input.auth.permissions,
+    roleName: input.auth.roleName,
+    roleId: input.auth.roleId,
     channel: input.channel,
     scope: input.scope,
     entries: paged.entries,

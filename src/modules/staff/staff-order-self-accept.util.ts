@@ -1,4 +1,8 @@
-import { StaffJobRole } from './staff-job-role.util';
+import {
+  StaffMappedCapabilities,
+  StaffResolvedAuth,
+  staffHasPermission,
+} from './staff-capability.mapper';
 import { StaffOrderChannel } from './staff-order-channel.util';
 import { StaffOrderStatus } from './staff-order-status.util';
 import {
@@ -9,17 +13,27 @@ import { StaffPresentedOrderEntry } from './staff-order-presenter.service';
 
 const TABLE_CALL_CONFIRMED: StaffOrderActionType = 'TABLE_CALL_CONFIRMED';
 
-export function shouldBlockWaiterSelfAccept(params: {
+type AuthCaps = StaffResolvedAuth | StaffMappedCapabilities;
+
+/**
+ * Self-accept is blocked when the actor has `orders:confirm` but not
+ * `orders:deliver` (classic waiter shape) and created the pending table order.
+ */
+export function shouldBlockStaffSelfAccept(params: {
   channel: StaffOrderChannel;
   status: StaffOrderStatus;
   createdByStaffId: number | null;
-  role: StaffJobRole;
+  auth: AuthCaps;
   currentStaffId: number;
 }): boolean {
+  const canConfirm = staffHasPermission(params.auth, 'orders:confirm');
+  const canDeliver = staffHasPermission(params.auth, 'orders:deliver');
+
   return (
     params.channel === 'table' &&
     params.status === 'pending' &&
-    params.role === 'waiter' &&
+    canConfirm &&
+    !canDeliver &&
     params.createdByStaffId != null &&
     params.createdByStaffId > 0 &&
     params.currentStaffId > 0 &&
@@ -38,17 +52,17 @@ export function filterSelfAcceptActions(
 export function applyStaffOrderSelfAcceptRules(
   entry: StaffPresentedOrderEntry,
   context: {
-    role: StaffJobRole;
+    auth: AuthCaps;
     currentStaffId: number;
     createdByStaffId: number | null;
   },
 ): StaffPresentedOrderEntry {
   const createdByStaffId = context.createdByStaffId;
-  const waitingForCashierApproval = shouldBlockWaiterSelfAccept({
+  const waitingForCashierApproval = shouldBlockStaffSelfAccept({
     channel: entry.channel,
     status: entry.status,
     createdByStaffId,
-    role: context.role,
+    auth: context.auth,
     currentStaffId: context.currentStaffId,
   });
 

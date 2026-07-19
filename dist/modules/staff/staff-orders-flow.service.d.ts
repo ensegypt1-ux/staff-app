@@ -1,6 +1,6 @@
 import { Request } from 'express';
 import { EnsHttpResult, EnsHttpService } from '../../infrastructure/ens-backend/ens-http.service';
-import { StaffJobRole } from './staff-job-role.util';
+import { StaffResolvedAuth } from './staff-capability.mapper';
 import { StaffOrderPresenterService, StaffPresentedDetailResult } from './staff-order-presenter.service';
 import { StaffTableOrderCreatorRegistry } from './staff-table-order-creator.registry';
 export declare class StaffOrdersFlowService {
@@ -10,7 +10,7 @@ export declare class StaffOrdersFlowService {
     private readonly logger;
     constructor(ensHttp: EnsHttpService, presenter: StaffOrderPresenterService, tableOrderCreators: StaffTableOrderCreatorRegistry);
     resolveMenuId(req: Request, query?: Record<string, unknown>, body?: Record<string, unknown>): number;
-    resolveRole(req: Request): Promise<StaffJobRole>;
+    resolveStaffAuth(req: Request): Promise<StaffResolvedAuth>;
     resolveStaffId(req: Request): number;
     private enrichEntryForStaff;
     private enrichEntriesForStaff;
@@ -26,22 +26,25 @@ export declare class StaffOrdersFlowService {
     postOrderAction(req: Request, staffCallId: number, action: string, menuId: number, activityLogId?: number): Promise<EnsHttpResult>;
     private autoConfirmPendingDeliveryOrder;
     getCapabilities(req: Request): Promise<{
-        staffJobRole: StaffJobRole;
-        capabilities: import("./staff-order-presenter.service").StaffOrderCapabilities;
+        permissions: string[];
+        roleName: string | null;
+        roleId: number | null;
+        staffJobRole: import("./staff-job-role.util").StaffJobRole;
+        capabilities: import("./staff-capability.mapper").StaffMappedCapabilities;
     }>;
-    canCreateTableOrders(role: StaffJobRole): boolean;
+    canCreateTableOrders(auth: StaffResolvedAuth): boolean;
     listRestaurantTables(req: Request): Promise<EnsHttpResult>;
     createTableOrder(req: Request, body: Record<string, unknown>): Promise<EnsHttpResult>;
     patchOrderItems(req: Request, staffCallId: number, menuId: number, items: unknown, activityLogId?: number): Promise<EnsHttpResult>;
     resolveMenuSlug(req: Request): Promise<string | null>;
     getMenuCatalog(req: Request, query: Record<string, unknown>): Promise<EnsHttpResult>;
-    private listWaiterOrders;
-    private sortWaiterActiveEntries;
-    private hydrateWaiterActiveListEntries;
+    private listTableOrders;
+    private sortActiveTableEntries;
+    private hydrateTableActiveListEntries;
     private resolveDetailListScope;
-    private listCashierOrders;
-    private listCashierTableHistory;
-    private cashierListQueryParams;
+    private listDeliveryOrders;
+    private listTableHistory;
+    private deliveryListQueryParams;
     private presentOrderMutation;
     private hydrateListEntries;
     private enrichEntriesActionDetailsFromActivityLogs;

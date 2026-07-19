@@ -1,4 +1,8 @@
-import { StaffJobRole } from './staff-job-role.util';
+import {
+  StaffMappedCapabilities,
+  StaffResolvedAuth,
+  staffHasPermission,
+} from './staff-capability.mapper';
 import { StaffOrderChannel } from './staff-order-channel.util';
 import {
   StaffOrderStatus,
@@ -26,10 +30,12 @@ const ACTION_LABELS: Record<
   TABLE_CALL_DELIVERED: { en: 'Mark delivered', ar: 'تم التسليم' },
 };
 
-/** Mirrors web `actionsForStatus`, filtered by staff job role and channel. */
+type AuthCaps = StaffResolvedAuth | StaffMappedCapabilities;
+
+/** Available order actions from permissions + channel + status. */
 export function availableActionsForOrder(
   status: StaffOrderStatus,
-  role: StaffJobRole,
+  auth: AuthCaps,
   channel: StaffOrderChannel = 'table',
 ): StaffOrderActionSpec[] {
   const specs: StaffOrderActionSpec[] = [];
@@ -38,14 +44,21 @@ export function availableActionsForOrder(
     specs.push({ action, label: ACTION_LABELS[action] });
   };
 
-  if (channel === 'delivery' && role === 'cashier') {
+  if (channel === 'delivery') {
+    if (!staffHasPermission(auth, 'delivery:view')) {
+      return specs;
+    }
     switch (status) {
       case 'pending':
       case 'confirmed':
-        push('TABLE_CALL_PREPARED');
+        if (staffHasPermission(auth, 'orders:prepare')) {
+          push('TABLE_CALL_PREPARED');
+        }
         break;
       case 'prepared':
-        push('TABLE_CALL_DELIVERED');
+        if (staffHasPermission(auth, 'orders:deliver')) {
+          push('TABLE_CALL_DELIVERED');
+        }
         break;
       default:
         break;
@@ -55,18 +68,20 @@ export function availableActionsForOrder(
 
   switch (status) {
     case 'pending':
-      if (role === 'cashier' || role === 'waiter') {
+      if (staffHasPermission(auth, 'orders:confirm')) {
         push('TABLE_CALL_CONFIRMED');
+      }
+      if (staffHasPermission(auth, 'orders:cancel')) {
         push('TABLE_CALL_CANCELLED');
       }
       break;
     case 'confirmed':
-      if (role === 'cashier') {
+      if (staffHasPermission(auth, 'orders:prepare')) {
         push('TABLE_CALL_PREPARED');
       }
       break;
     case 'prepared':
-      if (role === 'cashier') {
+      if (staffHasPermission(auth, 'orders:deliver')) {
         push('TABLE_CALL_DELIVERED');
       }
       break;
@@ -77,12 +92,22 @@ export function availableActionsForOrder(
   return specs;
 }
 
-export function canStaffProcessOrders(role: StaffJobRole): boolean {
-  return role === 'cashier';
+export function canStaffProcessOrders(auth: AuthCaps): boolean {
+  const caps =
+    'capabilities' in auth ? auth.capabilities : (auth as StaffMappedCapabilities);
+  return caps.canProcessOrders;
 }
 
-export function canStaffViewDelivery(role: StaffJobRole): boolean {
-  return role === 'cashier';
+export function canStaffViewDelivery(auth: AuthCaps): boolean {
+  return staffHasPermission(auth, 'delivery:view');
+}
+
+export function canStaffViewOrders(auth: AuthCaps): boolean {
+  return staffHasPermission(auth, 'orders:view');
+}
+
+export function canStaffViewHistory(auth: AuthCaps): boolean {
+  return staffHasPermission(auth, 'orders:view');
 }
 
 export function statusLabelFor(status: StaffOrderStatus): {
@@ -92,8 +117,31 @@ export function statusLabelFor(status: StaffOrderStatus): {
   return STAFF_ORDER_STATUS_LABELS[status];
 }
 
-export function isCashierOnlyAction(action: StaffOrderActionType): boolean {
-  return (
-    action === 'TABLE_CALL_PREPARED' || action === 'TABLE_CALL_DELIVERED'
-  );
+/** Permission required to perform a staff order action. */
+export function permissionForOrderAction(
+  action: StaffOrderActionType,
+):
+  | 'orders:confirm'
+  | 'orders:cancel'
+  | 'orders:prepare'
+  | 'orders:deliver' {
+  switch (action) {
+    case 'TABLE_CALL_CONFIRMED':
+      return 'orders:confirm';
+    case 'TABLE_CALL_CANCELLED':
+      return 'orders:cancel';
+    case 'TABLE_CALL_PREPARED':
+      return 'orders:prepare';
+    case 'TABLE_CALL_DELIVERED':
+      return 'orders:deliver';
+    default:
+      return 'orders:confirm';
+  }
+}
+
+export function canPerformOrderAction(
+  auth: AuthCaps,
+  action: StaffOrderActionType,
+): boolean {
+  return staffHasPermission(auth, permissionForOrderAction(action));
 }

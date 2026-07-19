@@ -1,19 +1,42 @@
 import { StaffOrderPresenterService } from './staff-order-presenter.service';
+import {
+  cashierAuth,
+  foodPreparerAuth,
+  waiterAuth,
+} from './staff-auth.fixtures';
 
 describe('StaffOrderPresenterService', () => {
   const presenter = new StaffOrderPresenterService();
 
-  it('capabilitiesFor enables item editing for waiter and cashier', () => {
-    expect(presenter.capabilitiesFor('waiter').canEditItems).toBe(true);
-    expect(presenter.capabilitiesFor('cashier').canEditItems).toBe(true);
+  it('capabilities response enables item editing from orders:edit_items', () => {
+    expect(presenter.capabilitiesFor(waiterAuth()).canEditItems).toBe(true);
+    expect(presenter.capabilitiesFor(cashierAuth()).canEditItems).toBe(true);
+    expect(presenter.capabilitiesFor(foodPreparerAuth()).canEditItems).toBe(
+      false,
+    );
   });
 
-  it('capabilitiesFor enables history only for cashier', () => {
-    expect(presenter.capabilitiesFor('waiter').canViewHistory).toBe(false);
-    expect(presenter.capabilitiesFor('cashier').canViewHistory).toBe(true);
+  it('capabilities enables history from orders:view', () => {
+    expect(presenter.capabilitiesFor(waiterAuth()).canViewHistory).toBe(true);
+    expect(presenter.capabilitiesFor(cashierAuth()).canViewHistory).toBe(true);
   });
 
-  it('canEditItems is true for pending table orders', () => {
+  it('capabilities exposes granular permission flags', () => {
+    const waiter = presenter.capabilitiesFor(waiterAuth());
+    expect(waiter['orders:view']).toBe(true);
+    expect(waiter['orders:prepare']).toBe(false);
+    expect(waiter.canViewKitchen).toBe(false);
+
+    const preparer = presenter.capabilitiesFor(foodPreparerAuth());
+    expect(preparer['orders:prepare']).toBe(true);
+    expect(preparer.canViewKitchen).toBe(true);
+
+    const cashier = presenter.capabilitiesFor(cashierAuth());
+    expect(cashier['delivery:view']).toBe(true);
+    expect(cashier.channels).toEqual(['table', 'delivery']);
+  });
+
+  it('canEditItems is true for pending table orders with edit permission', () => {
     const entry = presenter.presentTableCallRow(
       {
         id: 10,
@@ -21,13 +44,13 @@ describe('StaffOrderPresenterService', () => {
         tableNumber: '5',
         items: [{ name: 'Tea', quantity: 1, price: 5, total: 5 }],
       },
-      'waiter',
+      waiterAuth(),
     );
     expect(entry!.canEditItems).toBe(true);
     expect(entry!.channel).toBe('table');
   });
 
-  it('canEditItems is true for confirmed table orders for cashier only', () => {
+  it('canEditItems is true for confirmed table orders when orders:edit_items', () => {
     const waiterEntry = presenter.presentTableCallRow(
       {
         id: 11,
@@ -35,9 +58,9 @@ describe('StaffOrderPresenterService', () => {
         tableNumber: '3',
         items: [],
       },
-      'waiter',
+      waiterAuth(),
     );
-    expect(waiterEntry!.canEditItems).toBe(false);
+    expect(waiterEntry!.canEditItems).toBe(true);
 
     const cashierEntry = presenter.presentTableCallRow(
       {
@@ -46,24 +69,22 @@ describe('StaffOrderPresenterService', () => {
         tableNumber: '3',
         items: [],
       },
-      'cashier',
+      cashierAuth(),
     );
     expect(cashierEntry!.canEditItems).toBe(true);
   });
 
-  it('waiter cannot edit after accept on table orders', () => {
-    for (const status of ['confirmed', 'prepared'] as const) {
-      const entry = presenter.presentTableCallRow(
-        {
-          id: 12,
-          status,
-          tableNumber: '1',
-          items: [],
-        },
-        'waiter',
-      );
-      expect(entry!.canEditItems).toBe(false);
-    }
+  it('food_preparer cannot edit items', () => {
+    const entry = presenter.presentTableCallRow(
+      {
+        id: 12,
+        status: 'pending',
+        tableNumber: '1',
+        items: [],
+      },
+      foodPreparerAuth(),
+    );
+    expect(entry!.canEditItems).toBe(false);
   });
 
   it('cashier can edit table orders while pending or confirmed', () => {
@@ -75,7 +96,7 @@ describe('StaffOrderPresenterService', () => {
           tableNumber: '1',
           items: [],
         },
-        'cashier',
+        cashierAuth(),
       );
       expect(entry!.canEditItems).toBe(true);
     }
@@ -87,7 +108,7 @@ describe('StaffOrderPresenterService', () => {
         tableNumber: '1',
         items: [],
       },
-      'cashier',
+      cashierAuth(),
     );
     expect(prepared!.canEditItems).toBe(false);
   });
@@ -101,7 +122,7 @@ describe('StaffOrderPresenterService', () => {
           tableNumber: '1',
           items: [],
         },
-        'waiter',
+        cashierAuth(),
       );
       expect(entry!.canEditItems).toBe(false);
     }
@@ -117,7 +138,7 @@ describe('StaffOrderPresenterService', () => {
           type: 'delivery',
           items: [],
         },
-        'cashier',
+        cashierAuth(),
         'delivery',
       );
       expect(entry!.canEditItems).toBe(true);
@@ -132,13 +153,13 @@ describe('StaffOrderPresenterService', () => {
         type: 'delivery',
         items: [],
       },
-      'cashier',
+      cashierAuth(),
       'delivery',
     );
     expect(prepared!.canEditItems).toBe(false);
   });
 
-  it('canEditItems is false for delivery orders for waiter', () => {
+  it('canEditItems is false for delivery orders without delivery:view', () => {
     const entry = presenter.presentListRow(
       {
         id: 99,
@@ -147,7 +168,7 @@ describe('StaffOrderPresenterService', () => {
         type: 'delivery',
         items: [],
       },
-      'waiter',
+      waiterAuth(),
       'delivery',
     );
     expect(entry!.canEditItems).toBe(false);
@@ -163,7 +184,7 @@ describe('StaffOrderPresenterService', () => {
         type: 'delivery',
         items: [],
       },
-      'cashier',
+      cashierAuth(),
       'delivery',
     );
     expect(entry!.canEditItems).toBe(false);
@@ -174,15 +195,15 @@ describe('StaffOrderPresenterService', () => {
     const entries = [
       presenter.presentTableCallRow(
         { id: 1, status: 'delivered', tableNumber: '1', items: [] },
-        'waiter',
+        waiterAuth(),
       )!,
       presenter.presentTableCallRow(
         { id: 2, status: 'cancelled', tableNumber: '2', items: [] },
-        'waiter',
+        waiterAuth(),
       )!,
       presenter.presentTableCallRow(
         { id: 3, status: 'prepared', tableNumber: '3', items: [] },
-        'waiter',
+        waiterAuth(),
       )!,
     ];
     const history = presenter.filterByScope(entries, 'history');
@@ -197,7 +218,7 @@ describe('StaffOrderPresenterService', () => {
         tableNumber: '5',
         items: [],
       },
-      'cashier',
+      cashierAuth(),
     )!;
     const archived = presenter.applyListScope(entry, 'history');
     expect(archived.availableActions).toEqual([]);
@@ -228,7 +249,7 @@ describe('StaffOrderPresenterService', () => {
           },
         ],
       },
-      'cashier',
+      cashierAuth(),
       'table',
     )!;
 
@@ -241,7 +262,7 @@ describe('StaffOrderPresenterService', () => {
         items: [{ name: 'Tea', quantity: 1, price: 5, total: 5 }],
         at: '2026-01-01T10:05:00Z',
       },
-      'cashier',
+      cashierAuth(),
     );
 
     expect(merged.actionDetails).toEqual(base.actionDetails);
@@ -266,7 +287,7 @@ describe('StaffOrderPresenterService', () => {
           },
         ],
       },
-      'cashier',
+      cashierAuth(),
       'table',
     )!;
 
@@ -287,7 +308,7 @@ describe('StaffOrderPresenterService', () => {
         order: { status: 'confirmed' },
         items: [],
       },
-      'cashier',
+      cashierAuth(),
     )!;
 
     expect(listEntry.actionDetails[0]?.action).toBe('TABLE_CALL_CONFIRMED');
@@ -302,7 +323,7 @@ describe('StaffOrderPresenterService', () => {
         tableNumber: '2',
         items: [],
       },
-      'waiter',
+      waiterAuth(),
     )!;
 
     const enriched = presenter.enrichEntriesActionDetails([sparse], [

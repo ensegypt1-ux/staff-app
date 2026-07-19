@@ -14,21 +14,10 @@ const staff_order_channel_util_1 = require("./staff-order-channel.util");
 const staff_order_edit_permissions_util_1 = require("./staff-order-edit-permissions.util");
 const staff_order_action_details_util_1 = require("./staff-order-action-details.util");
 let StaffOrderPresenterService = class StaffOrderPresenterService {
-    capabilitiesFor(role) {
-        const channels = ['table'];
-        if ((0, staff_order_actions_util_1.canStaffViewDelivery)(role)) {
-            channels.push('delivery');
-        }
-        return {
-            staffJobRole: role,
-            canProcessOrders: (0, staff_order_actions_util_1.canStaffProcessOrders)(role),
-            canViewDelivery: (0, staff_order_actions_util_1.canStaffViewDelivery)(role),
-            canViewHistory: role === 'cashier',
-            canEditItems: true,
-            channels,
-        };
+    capabilitiesFor(auth) {
+        return auth.capabilities;
     }
-    presentTableCallRow(raw, role) {
+    presentTableCallRow(raw, auth) {
         const channel = this.resolveChannel(raw);
         const staffCallId = this.parseStaffCallId(raw);
         if (staffCallId <= 0)
@@ -46,7 +35,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
         });
         return this.buildEntry({
             raw,
-            role,
+            auth,
             channel,
             staffCallId,
             activityLogId: null,
@@ -56,7 +45,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             actions: null,
         });
     }
-    mergeCallHydration(entry, call, role) {
+    mergeCallHydration(entry, call, auth) {
         if (entry.channel === 'delivery') {
             return entry;
         }
@@ -67,7 +56,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
         const hydrated = this.presentTableCallRow({
             ...call,
             orderId: call.id ?? entry.staffCallId,
-        }, role);
+        }, auth);
         if (!hydrated)
             return entry;
         return this.mergeEntryFields(entry, hydrated);
@@ -106,7 +95,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             return fallback;
         return primary ?? fallback;
     }
-    presentListRow(raw, role, channel) {
+    presentListRow(raw, auth, channel) {
         const entryChannel = this.resolveChannel(raw, channel);
         if (entryChannel !== channel)
             return null;
@@ -124,7 +113,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
         });
         return this.buildEntry({
             raw,
-            role,
+            auth,
             channel: entryChannel,
             staffCallId,
             activityLogId,
@@ -134,7 +123,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             actions: null,
         });
     }
-    presentDetail(raw, role) {
+    presentDetail(raw, auth) {
         const channel = this.resolveChannel(raw);
         const staffCallId = this.parseStaffCallId(raw);
         if (staffCallId <= 0)
@@ -151,7 +140,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
         const status = (0, staff_order_status_util_1.resolveLatestOrderStatus)(actions, order);
         return this.buildEntry({
             raw: { ...raw, ...order },
-            role,
+            auth,
             channel,
             staffCallId,
             activityLogId,
@@ -164,8 +153,8 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
     buildEntry(input) {
         const totalPrice = this.resolveTotalPrice(input.raw, input.items);
         const itemCount = input.items.reduce((sum, line) => sum + line.quantity, 0);
-        const availableActions = (0, staff_order_actions_util_1.availableActionsForOrder)(input.status, input.role, input.channel);
-        const canEditItems = (0, staff_order_edit_permissions_util_1.resolveCanEditItems)(input.channel, input.role, input.status);
+        const availableActions = (0, staff_order_actions_util_1.availableActionsForOrder)(input.status, input.auth, input.channel);
+        const canEditItems = (0, staff_order_edit_permissions_util_1.resolveCanEditItems)(input.channel, input.auth, input.status);
         return {
             id: String(input.activityLogId ?? input.staffCallId),
             staffCallId: input.staffCallId,

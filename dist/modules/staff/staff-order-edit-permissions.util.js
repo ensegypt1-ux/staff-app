@@ -1,19 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveCanEditItems = resolveCanEditItems;
-function resolveCanEditItems(channel, role, status) {
+const staff_capability_mapper_1 = require("./staff-capability.mapper");
+function resolveCanEditItems(channel, auth, status) {
     if (status === 'delivered' || status === 'cancelled') {
         return false;
     }
-    if (role === 'waiter') {
-        return channel === 'table' && status === 'pending';
+    if (!(0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:edit_items')) {
+        return false;
     }
-    if (role === 'cashier') {
-        if (channel !== 'table' && channel !== 'delivery') {
-            return false;
-        }
-        return status === 'pending' || status === 'confirmed';
+    if (channel === 'delivery' && !(0, staff_capability_mapper_1.staffHasPermission)(auth, 'delivery:view')) {
+        return false;
     }
-    return false;
+    if (channel !== 'table' && channel !== 'delivery') {
+        return false;
+    }
+    return status === 'pending' || status === 'confirmed';
 }
 //# sourceMappingURL=staff-order-edit-permissions.util.js.map

@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { StaffJobRole } from './staff-job-role.util';
+import {
+  StaffMappedCapabilities,
+  StaffResolvedAuth,
+} from './staff-capability.mapper';
 import {
   availableActionsForOrder,
-  canStaffProcessOrders,
-  canStaffViewDelivery,
   statusLabelFor,
   StaffOrderActionSpec,
 } from './staff-order-actions.util';
@@ -25,6 +26,7 @@ import {
   pickRicherActionDetails,
   StaffOrderActionDetail,
 } from './staff-order-action-details.util';
+import { StaffJobRole } from './staff-job-role.util';
 
 export type { StaffOrderChannel };
 
@@ -66,17 +68,15 @@ export type StaffPresentedOrderEntry = {
   waitingForCashierApproval: boolean;
 };
 
-export type StaffOrderCapabilities = {
-  staffJobRole: StaffJobRole;
-  canProcessOrders: boolean;
-  canViewDelivery: boolean;
-  canViewHistory: boolean;
-  canEditItems: boolean;
-  channels: StaffOrderChannel[];
-};
+/** @deprecated Prefer StaffMappedCapabilities from the capability mapper. */
+export type StaffOrderCapabilities = StaffMappedCapabilities;
 
 export type StaffPresentedListResult = {
+  /** @deprecated Prefer permissions-driven fields. */
   staffJobRole: StaffJobRole;
+  permissions: string[];
+  roleName: string | null;
+  roleId: number | null;
   channel: StaffOrderChannel;
   scope: 'active' | 'history';
   entries: StaffPresentedOrderEntry[];
@@ -84,7 +84,7 @@ export type StaffPresentedListResult = {
   page: number;
   limit: number;
   totalPages: number;
-  capabilities: StaffOrderCapabilities;
+  capabilities: StaffMappedCapabilities;
   filters?: {
     dateFrom: string;
     dateTo: string;
@@ -92,32 +92,25 @@ export type StaffPresentedListResult = {
 };
 
 export type StaffPresentedDetailResult = {
+  /** @deprecated Prefer permissions-driven fields. */
   staffJobRole: StaffJobRole;
+  permissions: string[];
+  roleName: string | null;
+  roleId: number | null;
   entry: StaffPresentedOrderEntry;
   actions: Array<Record<string, unknown>>;
-  capabilities: StaffOrderCapabilities;
+  capabilities: StaffMappedCapabilities;
 };
 
 @Injectable()
 export class StaffOrderPresenterService {
-  capabilitiesFor(role: StaffJobRole): StaffOrderCapabilities {
-    const channels: StaffOrderChannel[] = ['table'];
-    if (canStaffViewDelivery(role)) {
-      channels.push('delivery');
-    }
-    return {
-      staffJobRole: role,
-      canProcessOrders: canStaffProcessOrders(role),
-      canViewDelivery: canStaffViewDelivery(role),
-      canViewHistory: role === 'cashier',
-      canEditItems: true,
-      channels,
-    };
+  capabilitiesFor(auth: StaffResolvedAuth): StaffMappedCapabilities {
+    return auth.capabilities;
   }
 
   presentTableCallRow(
     raw: Record<string, unknown>,
-    role: StaffJobRole,
+    auth: StaffResolvedAuth,
   ): StaffPresentedOrderEntry | null {
     const channel = this.resolveChannel(raw);
     const staffCallId = this.parseStaffCallId(raw);
@@ -137,7 +130,7 @@ export class StaffOrderPresenterService {
 
     return this.buildEntry({
       raw,
-      role,
+      auth,
       channel,
       staffCallId,
       activityLogId: null,
@@ -151,7 +144,7 @@ export class StaffOrderPresenterService {
   mergeCallHydration(
     entry: StaffPresentedOrderEntry,
     call: Record<string, unknown>,
-    role: StaffJobRole,
+    auth: StaffResolvedAuth,
   ): StaffPresentedOrderEntry {
     if (entry.channel === 'delivery') {
       return entry;
@@ -167,7 +160,7 @@ export class StaffOrderPresenterService {
         ...call,
         orderId: call.id ?? entry.staffCallId,
       },
-      role,
+      auth,
     );
     if (!hydrated) return entry;
 
@@ -232,7 +225,7 @@ export class StaffOrderPresenterService {
 
   presentListRow(
     raw: Record<string, unknown>,
-    role: StaffJobRole,
+    auth: StaffResolvedAuth,
     channel: StaffOrderChannel,
   ): StaffPresentedOrderEntry | null {
     const entryChannel = this.resolveChannel(raw, channel);
@@ -253,7 +246,7 @@ export class StaffOrderPresenterService {
 
     return this.buildEntry({
       raw,
-      role,
+      auth,
       channel: entryChannel,
       staffCallId,
       activityLogId,
@@ -266,7 +259,7 @@ export class StaffOrderPresenterService {
 
   presentDetail(
     raw: Record<string, unknown>,
-    role: StaffJobRole,
+    auth: StaffResolvedAuth,
   ): StaffPresentedOrderEntry | null {
     const channel = this.resolveChannel(raw);
     const staffCallId = this.parseStaffCallId(raw);
@@ -288,7 +281,7 @@ export class StaffOrderPresenterService {
 
     return this.buildEntry({
       raw: { ...raw, ...order },
-      role,
+      auth,
       channel,
       staffCallId,
       activityLogId,
@@ -301,7 +294,7 @@ export class StaffOrderPresenterService {
 
   private buildEntry(input: {
     raw: Record<string, unknown>;
-    role: StaffJobRole;
+    auth: StaffResolvedAuth;
     channel: StaffOrderChannel;
     staffCallId: number;
     activityLogId: number | null;
@@ -314,12 +307,12 @@ export class StaffOrderPresenterService {
     const itemCount = input.items.reduce((sum, line) => sum + line.quantity, 0);
     const availableActions = availableActionsForOrder(
       input.status,
-      input.role,
+      input.auth,
       input.channel,
     );
     const canEditItems = resolveCanEditItems(
       input.channel,
-      input.role,
+      input.auth,
       input.status,
     );
 

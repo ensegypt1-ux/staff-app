@@ -1,28 +1,38 @@
-import { StaffJobRole } from './staff-job-role.util';
+import {
+  StaffMappedCapabilities,
+  StaffResolvedAuth,
+  staffHasPermission,
+} from './staff-capability.mapper';
 import { StaffOrderChannel } from './staff-order-channel.util';
 import { StaffOrderStatus } from './staff-order-status.util';
 
-/** Single source of truth for order item editing by role, channel, and status. */
+type AuthCaps = StaffResolvedAuth | StaffMappedCapabilities;
+
+/**
+ * Order item editing is gated by `orders:edit_items` plus upstream status rules
+ * (pending/confirmed only). Delivery also requires `delivery:view`.
+ */
 export function resolveCanEditItems(
   channel: StaffOrderChannel,
-  role: StaffJobRole,
+  auth: AuthCaps,
   status: StaffOrderStatus,
 ): boolean {
   if (status === 'delivered' || status === 'cancelled') {
     return false;
   }
 
-  if (role === 'waiter') {
-    return channel === 'table' && status === 'pending';
+  if (!staffHasPermission(auth, 'orders:edit_items')) {
+    return false;
   }
 
-  if (role === 'cashier') {
-    if (channel !== 'table' && channel !== 'delivery') {
-      return false;
-    }
-    // Upstream item PATCH allows pending + confirmed only.
-    return status === 'pending' || status === 'confirmed';
+  if (channel === 'delivery' && !staffHasPermission(auth, 'delivery:view')) {
+    return false;
   }
 
-  return false;
+  if (channel !== 'table' && channel !== 'delivery') {
+    return false;
+  }
+
+  // Upstream item PATCH allows pending + confirmed only.
+  return status === 'pending' || status === 'confirmed';
 }
