@@ -51,7 +51,7 @@ describe('mapStaffCapabilities', () => {
     expect(caps['delivery:view']).toBe(true);
     expect(caps['menu:view']).toBe(true);
     expect(caps['menu:tables']).toBe(true);
-    expect(caps.canViewKitchen).toBe(true);
+    expect(caps.canViewKitchen).toBe(false);
     expect(caps.canViewDelivery).toBe(true);
     expect(caps.canProcessOrders).toBe(true);
     expect(caps.channels).toEqual(['table', 'delivery']);
@@ -69,7 +69,7 @@ describe('mapStaffCapabilities', () => {
     expect(caps['orders:prepare']).toBe(true);
     expect(caps['orders:confirm']).toBe(false);
     expect(caps['orders:edit_items']).toBe(false);
-    expect(caps.canViewKitchen).toBe(true);
+    expect(caps.canViewKitchen).toBe(false);
     expect(caps.canEditItems).toBe(false);
     expect(caps.channels).toEqual(['table']);
   });
@@ -113,7 +113,7 @@ describe('mapStaffCapabilities', () => {
   it('fixtures produce expected role shapes', () => {
     expect(waiterAuth().capabilities['orders:deliver']).toBe(false);
     expect(cashierAuth().capabilities['delivery:view']).toBe(true);
-    expect(foodPreparerAuth().capabilities.canViewKitchen).toBe(true);
+    expect(foodPreparerAuth().capabilities.canViewKitchen).toBe(false);
     expect(
       authFromPermissions(['orders:view', 'orders:complete']).capabilities[
         'orders:complete'

@@ -9,8 +9,8 @@ import { StaffOrderStatus } from './staff-order-status.util';
 type AuthCaps = StaffResolvedAuth | StaffMappedCapabilities;
 
 /**
- * Order item editing is gated by `orders:edit_items` plus upstream status rules
- * (pending/confirmed only). Delivery also requires `delivery:view`.
+ * Mirrors Web `isEditableOrderStatus`: pending | confirmed | prepared
+ * when `orders:edit_items` is granted. Delivery also requires `delivery:view`.
  */
 export function resolveCanEditItems(
   channel: StaffOrderChannel,
@@ -33,6 +33,7 @@ export function resolveCanEditItems(
     return false;
   }
 
-  // Upstream item PATCH allows pending + confirmed only.
-  return status === 'pending' || status === 'confirmed';
+  return (
+    status === 'pending' || status === 'confirmed' || status === 'prepared'
+  );
 }

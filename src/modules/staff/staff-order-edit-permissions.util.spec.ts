@@ -6,21 +6,21 @@ import {
   waiterAuth,
 } from './staff-auth.fixtures';
 
-describe('resolveCanEditItems', () => {
-  it('waiter with orders:edit_items can edit pending and confirmed table orders', () => {
+describe('resolveCanEditItems (Web parity)', () => {
+  it('waiter with orders:edit_items can edit pending, confirmed, prepared table orders', () => {
     const auth = waiterAuth();
     expect(resolveCanEditItems('table', auth, 'pending')).toBe(true);
     expect(resolveCanEditItems('table', auth, 'confirmed')).toBe(true);
-    expect(resolveCanEditItems('table', auth, 'prepared')).toBe(false);
+    expect(resolveCanEditItems('table', auth, 'prepared')).toBe(true);
     expect(resolveCanEditItems('delivery', auth, 'pending')).toBe(false);
   });
 
-  it('cashier can edit table and delivery while pending or confirmed', () => {
+  it('cashier can edit table and delivery through prepared', () => {
     const auth = cashierAuth();
     for (const channel of ['table', 'delivery'] as const) {
       expect(resolveCanEditItems(channel, auth, 'pending')).toBe(true);
       expect(resolveCanEditItems(channel, auth, 'confirmed')).toBe(true);
-      expect(resolveCanEditItems(channel, auth, 'prepared')).toBe(false);
+      expect(resolveCanEditItems(channel, auth, 'prepared')).toBe(true);
     }
   });
 

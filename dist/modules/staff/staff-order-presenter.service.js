@@ -86,6 +86,12 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             totalPrice: base.totalPrice > 0 ? base.totalPrice : overlay.totalPrice,
             createdAt: base.createdAt ?? overlay.createdAt,
             actionDetails: (0, staff_order_action_details_util_1.pickRicherActionDetails)(base.actionDetails, overlay.actionDetails),
+            pendingGuestAddition: base.pendingGuestAddition || overlay.pendingGuestAddition,
+            pendingBillRequest: base.pendingBillRequest || overlay.pendingBillRequest,
+            availableActions: base.availableActions,
+            canEditItems: base.canEditItems,
+            createdByStaffId: null,
+            waitingForCashierApproval: false,
         };
     }
     pickString(primary, fallback) {
@@ -153,7 +159,9 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
     buildEntry(input) {
         const totalPrice = this.resolveTotalPrice(input.raw, input.items);
         const itemCount = input.items.reduce((sum, line) => sum + line.quantity, 0);
-        const availableActions = (0, staff_order_actions_util_1.availableActionsForOrder)(input.status, input.auth, input.channel);
+        const pendingGuestAddition = input.raw.pendingGuestAddition === true;
+        const pendingBillRequest = input.raw.pendingBillRequest === true;
+        const availableActions = (0, staff_order_actions_util_1.availableActionsForOrder)(input.status, input.auth, input.channel, { pendingGuestAddition });
         const canEditItems = (0, staff_order_edit_permissions_util_1.resolveCanEditItems)(input.channel, input.auth, input.status);
         return {
             id: String(input.activityLogId ?? input.staffCallId),
@@ -178,6 +186,8 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             actionDetails: input.actionDetails,
             availableActions,
             canEditItems,
+            pendingGuestAddition,
+            pendingBillRequest,
             createdByStaffId: null,
             waitingForCashierApproval: false,
         };

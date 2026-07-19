@@ -155,7 +155,8 @@ export function mapStaffCapabilities(
   const analyticsView = hasPermission(set, 'analytics:view');
   const staffManage = hasPermission(set, 'staff:manage');
   const settingsManage = hasPermission(set, 'settings:manage');
-  const canViewKitchen = ordersPrepare;
+  // Kitchen tab was Staff-only prepare flow for table orders — disabled for Web parity.
+  const canViewKitchen = false;
 
   const staffJobRole = deriveDeprecatedStaffJobRole({
     legacyRole: input.legacyRole,

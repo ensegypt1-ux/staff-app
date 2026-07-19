@@ -10,7 +10,7 @@ import {
   waiterAuth,
 } from './staff-auth.fixtures';
 
-describe('availableActionsForOrder (permission matrix)', () => {
+describe('availableActionsForOrder (Web table parity)', () => {
   it('waiter table pending offers confirm + cancel', () => {
     const actions = availableActionsForOrder('pending', waiterAuth(), 'table');
     expect(actions.map((a) => a.action)).toEqual([
@@ -19,7 +19,7 @@ describe('availableActionsForOrder (permission matrix)', () => {
     ]);
   });
 
-  it('waiter cannot prepare or deliver', () => {
+  it('waiter confirmed/prepared has no finish without orders:complete', () => {
     expect(
       availableActionsForOrder('confirmed', waiterAuth(), 'table').map(
         (a) => a.action,
@@ -40,34 +40,45 @@ describe('availableActionsForOrder (permission matrix)', () => {
     ]);
   });
 
-  it('cashier table confirmed offers prepare', () => {
+  it('cashier table confirmed/prepared offers Finish (COMPLETED)', () => {
     expect(
       availableActionsForOrder('confirmed', cashierAuth(), 'table').map(
         (a) => a.action,
       ),
-    ).toEqual(['TABLE_CALL_PREPARED']);
-  });
-
-  it('cashier table prepared offers deliver', () => {
+    ).toEqual(['TABLE_CALL_COMPLETED']);
     expect(
       availableActionsForOrder('prepared', cashierAuth(), 'table').map(
         (a) => a.action,
       ),
-    ).toEqual(['TABLE_CALL_DELIVERED']);
+    ).toEqual(['TABLE_CALL_COMPLETED']);
+  });
+
+  it('table channel never offers prepare or deliver', () => {
+    for (const status of ['pending', 'confirmed', 'prepared'] as const) {
+      const actions = availableActionsForOrder(
+        status,
+        cashierAuth(),
+        'table',
+      ).map((a) => a.action);
+      expect(actions).not.toContain('TABLE_CALL_PREPARED');
+      expect(actions).not.toContain('TABLE_CALL_DELIVERED');
+    }
+  });
+
+  it('pendingGuestAddition on confirmed offers accept addition only', () => {
+    const actions = availableActionsForOrder(
+      'confirmed',
+      cashierAuth(),
+      'table',
+      { pendingGuestAddition: true },
+    );
+    expect(actions.map((a) => a.action)).toEqual(['TABLE_CALL_CONFIRMED']);
+    expect(actions[0]?.label.en).toBe('Accept addition');
   });
 
   it('delivery pending offers mark prepared when orders:prepare', () => {
     const actions = availableActionsForOrder(
       'pending',
-      cashierAuth(),
-      'delivery',
-    );
-    expect(actions.map((a) => a.action)).toEqual(['TABLE_CALL_PREPARED']);
-  });
-
-  it('delivery confirmed offers mark prepared for cashier', () => {
-    const actions = availableActionsForOrder(
-      'confirmed',
       cashierAuth(),
       'delivery',
     );
@@ -83,30 +94,38 @@ describe('availableActionsForOrder (permission matrix)', () => {
     expect(actions.map((a) => a.action)).toEqual(['TABLE_CALL_DELIVERED']);
   });
 
-  it('food_preparer only offers prepare on confirmed table orders', () => {
+  it('food_preparer has no table prepare (Web parity)', () => {
     const auth = foodPreparerAuth();
     expect(
       availableActionsForOrder('pending', auth, 'table').map((a) => a.action),
     ).toEqual([]);
     expect(
       availableActionsForOrder('confirmed', auth, 'table').map((a) => a.action),
-    ).toEqual(['TABLE_CALL_PREPARED']);
-    expect(
-      availableActionsForOrder('prepared', auth, 'table').map((a) => a.action),
     ).toEqual([]);
   });
 
-  it('custom role confirm-only cannot prepare', () => {
-    const auth = authFromPermissions(['orders:view', 'orders:confirm']);
-    expect(
-      availableActionsForOrder('confirmed', auth, 'table').map((a) => a.action),
-    ).toEqual([]);
-    expect(canPerformOrderAction(auth, 'TABLE_CALL_PREPARED')).toBe(false);
-    expect(canPerformOrderAction(auth, 'TABLE_CALL_CONFIRMED')).toBe(true);
+  it('canPerformOrderAction maps COMPLETED to orders:complete', () => {
+    expect(canPerformOrderAction(waiterAuth(), 'TABLE_CALL_COMPLETED')).toBe(
+      false,
+    );
+    expect(canPerformOrderAction(cashierAuth(), 'TABLE_CALL_COMPLETED')).toBe(
+      true,
+    );
   });
 
   it('canStaffViewDelivery follows delivery:view', () => {
     expect(canStaffViewDelivery(waiterAuth())).toBe(false);
     expect(canStaffViewDelivery(cashierAuth())).toBe(true);
+  });
+
+  it('custom role with complete can finish', () => {
+    const auth = authFromPermissions([
+      'orders:view',
+      'orders:confirm',
+      'orders:complete',
+    ]);
+    expect(
+      availableActionsForOrder('confirmed', auth, 'table').map((a) => a.action),
+    ).toEqual(['TABLE_CALL_COMPLETED']);
   });
 });

@@ -38,7 +38,7 @@ export declare class StaffOrdersFlowService {
     patchOrderItems(req: Request, staffCallId: number, menuId: number, items: unknown, activityLogId?: number): Promise<EnsHttpResult>;
     resolveMenuSlug(req: Request): Promise<string | null>;
     getMenuCatalog(req: Request, query: Record<string, unknown>): Promise<EnsHttpResult>;
-    private listTableOrders;
+    private listTableOrdersViaActivityLogs;
     private sortActiveTableEntries;
     private hydrateTableActiveListEntries;
     private resolveDetailListScope;

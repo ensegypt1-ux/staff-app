@@ -15,11 +15,20 @@ const ACTION_LABELS = {
     TABLE_CALL_CANCELLED: { en: 'Reject', ar: 'رفض' },
     TABLE_CALL_PREPARED: { en: 'Mark prepared', ar: 'تم التحضير' },
     TABLE_CALL_DELIVERED: { en: 'Mark delivered', ar: 'تم التسليم' },
+    TABLE_CALL_COMPLETED: { en: 'Finish', ar: 'إنهاء' },
 };
-function availableActionsForOrder(status, auth, channel = 'table') {
+const ACCEPT_ADDITION_LABEL = {
+    en: 'Accept addition',
+    ar: 'قبول الإضافة',
+};
+function availableActionsForOrder(status, auth, channel = 'table', options = {}) {
     const specs = [];
-    const push = (action) => {
-        specs.push({ action, label: ACTION_LABELS[action] });
+    const pendingGuestAddition = options.pendingGuestAddition === true;
+    const push = (action, labelOverride) => {
+        specs.push({
+            action,
+            label: labelOverride ?? ACTION_LABELS[action],
+        });
     };
     if (channel === 'delivery') {
         if (!(0, staff_capability_mapper_1.staffHasPermission)(auth, 'delivery:view')) {
@@ -42,23 +51,26 @@ function availableActionsForOrder(status, auth, channel = 'table') {
         }
         return specs;
     }
+    if (pendingGuestAddition &&
+        (status === 'confirmed' || status === 'prepared')) {
+        if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:confirm')) {
+            push('TABLE_CALL_CONFIRMED', ACCEPT_ADDITION_LABEL);
+        }
+        return specs;
+    }
     switch (status) {
         case 'pending':
             if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:confirm')) {
-                push('TABLE_CALL_CONFIRMED');
+                push('TABLE_CALL_CONFIRMED', pendingGuestAddition ? ACCEPT_ADDITION_LABEL : undefined);
             }
             if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:cancel')) {
                 push('TABLE_CALL_CANCELLED');
             }
             break;
         case 'confirmed':
-            if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:prepare')) {
-                push('TABLE_CALL_PREPARED');
-            }
-            break;
         case 'prepared':
-            if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:deliver')) {
-                push('TABLE_CALL_DELIVERED');
+            if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:complete')) {
+                push('TABLE_CALL_COMPLETED');
             }
             break;
         default:
@@ -92,6 +104,8 @@ function permissionForOrderAction(action) {
             return 'orders:prepare';
         case 'TABLE_CALL_DELIVERED':
             return 'orders:deliver';
+        case 'TABLE_CALL_COMPLETED':
+            return 'orders:complete';
         default:
             return 'orders:confirm';
     }

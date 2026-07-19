@@ -61,6 +61,7 @@ function orderStatusFromAction(action) {
         case 'TABLE_CALL_PREPARED':
             return 'prepared';
         case 'TABLE_CALL_DELIVERED':
+        case 'TABLE_CALL_COMPLETED':
             return 'delivered';
         default:
             return 'pending';

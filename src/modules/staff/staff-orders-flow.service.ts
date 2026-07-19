@@ -48,10 +48,6 @@ import {
   parseStaffCallCreateId,
 } from './staff-table-order.util';
 import { StaffTableOrderCreatorRegistry } from './staff-table-order-creator.registry';
-import {
-  applyStaffOrderSelfAcceptRules,
-  shouldBlockStaffSelfAccept,
-} from './staff-order-self-accept.util';
 import { getAuthIdentity } from '../../common/utils/jwt-payload.util';
 
 type Scope = 'active' | 'history';
@@ -158,42 +154,31 @@ export class StaffOrdersFlowService {
     return getAuthIdentity(req)?.userId ?? 0;
   }
 
+  /** Self-accept removed for Web Tables parity — entries pass through unchanged. */
   private async enrichEntryForStaff(
-    req: Request,
-    menuId: number,
-    auth: StaffResolvedAuth,
+    _req: Request,
+    _menuId: number,
+    _auth: StaffResolvedAuth,
     entry: StaffPresentedOrderEntry,
   ): Promise<StaffPresentedOrderEntry> {
-    const currentStaffId = this.resolveStaffId(req);
-    const createdByStaffId = this.tableOrderCreators.lookup(
-      menuId,
-      entry.staffCallId,
-    );
-    return applyStaffOrderSelfAcceptRules(entry, {
-      auth,
-      currentStaffId,
-      createdByStaffId,
-    });
+    return {
+      ...entry,
+      createdByStaffId: null,
+      waitingForCashierApproval: false,
+    };
   }
 
   private async enrichEntriesForStaff(
-    req: Request,
-    menuId: number,
-    auth: StaffResolvedAuth,
+    _req: Request,
+    _menuId: number,
+    _auth: StaffResolvedAuth,
     entries: StaffPresentedOrderEntry[],
   ): Promise<StaffPresentedOrderEntry[]> {
-    if (entries.length === 0 || menuId <= 0) return entries;
-    const currentStaffId = this.resolveStaffId(req);
-    return entries.map((entry) =>
-      applyStaffOrderSelfAcceptRules(entry, {
-        auth,
-        currentStaffId,
-        createdByStaffId: this.tableOrderCreators.lookup(
-          menuId,
-          entry.staffCallId,
-        ),
-      }),
-    );
+    return entries.map((entry) => ({
+      ...entry,
+      createdByStaffId: null,
+      waitingForCashierApproval: false,
+    }));
   }
 
   async listOrders(
@@ -240,8 +225,16 @@ export class StaffOrdersFlowService {
       };
     }
 
-    // Table orders always use staff-auth/table-calls (never activity-logs).
-    return this.listTableOrders(req, auth, channel, scope, page, limit, query);
+    // Table orders: Web dashboard parity — activity-logs channel=table.
+    return this.listTableOrdersViaActivityLogs(
+      req,
+      auth,
+      channel,
+      scope,
+      page,
+      limit,
+      query,
+    );
   }
 
   async getOrder(
@@ -266,26 +259,36 @@ export class StaffOrdersFlowService {
 
     let detailRaw: Record<string, unknown> | null = null;
 
-    if (canStaffViewDelivery(auth)) {
-      const resolvedLogId =
-        Number.isFinite(activityLogId) && activityLogId > 0
-          ? activityLogId
-          : await this.resolveActivityLogId(
-              req,
-              menuId,
-              staffCallId,
-              activityLogId,
-            );
+    // Prefer activity-log detail (Web dashboard parity) for table + delivery.
+    const resolvedLogId =
+      Number.isFinite(activityLogId) && activityLogId > 0
+        ? activityLogId
+        : await this.resolveActivityLogId(
+            req,
+            menuId,
+            staffCallId,
+            activityLogId,
+          );
 
-      if (resolvedLogId > 0) {
-        const logRaw = await this.fetchActivityLogRaw(
-          req,
-          menuId,
-          resolvedLogId,
-        );
-        if (logRaw && isDeliveryUpstreamRow(logRaw)) {
-          detailRaw = logRaw;
+    if (resolvedLogId > 0) {
+      const logRaw = await this.fetchActivityLogRaw(
+        req,
+        menuId,
+        resolvedLogId,
+      );
+      if (logRaw) {
+        if (isDeliveryUpstreamRow(logRaw) && !canStaffViewDelivery(auth)) {
+          return {
+            denied: true,
+            httpStatus: 403,
+            data: {
+              error: 'Delivery orders are not available for your staff role',
+              errorAr: 'طلبات التوصيل غير متاحة لدورك الوظيفي',
+              code: 'STAFF_DELIVERY_DENIED',
+            },
+          };
         }
+        detailRaw = logRaw;
       }
     }
 
@@ -422,32 +425,6 @@ export class StaffOrdersFlowService {
       };
     }
 
-    if (normalizedAction === 'TABLE_CALL_CONFIRMED') {
-      const staffId = this.resolveStaffId(req);
-      const createdByStaffId = this.tableOrderCreators.lookup(
-        resolvedMenuId,
-        staffCallId,
-      );
-      if (
-        shouldBlockStaffSelfAccept({
-          channel: 'table',
-          status: 'pending',
-          createdByStaffId,
-          auth,
-          currentStaffId: staffId,
-        })
-      ) {
-        return {
-          status: 403,
-          data: {
-            error: 'You cannot accept an order you created',
-            errorAr: 'لا يمكنك قبول طلب أنشأته بنفسك',
-            code: 'STAFF_SELF_ACCEPT_DENIED',
-          },
-        };
-      }
-    }
-
     const tableCallRaw = await this.fetchTableCallRaw(req, staffCallId);
     const hasTableCall = tableCallRaw != null;
     const isDeliveryCall =
@@ -462,8 +439,22 @@ export class StaffOrdersFlowService {
 
     let upstream: EnsHttpResult;
 
-    if (normalizedAction === 'TABLE_CALL_PREPARED' && hasTableCall) {
-      // Prefer dedicated prepare endpoint whenever a table call exists.
+    // Table channel (Web parity): all lifecycle actions via activity-logs.
+    if (
+      !isDeliveryCall &&
+      logId > 0 &&
+      (normalizedAction === 'TABLE_CALL_CONFIRMED' ||
+        normalizedAction === 'TABLE_CALL_CANCELLED' ||
+        normalizedAction === 'TABLE_CALL_COMPLETED')
+    ) {
+      upstream = await this.ensHttp.proxy({
+        method: 'POST',
+        path: `menus/${resolvedMenuId}/activity-logs/${logId}/actions`,
+        req,
+        body: { action: normalizedAction },
+      });
+    } else if (normalizedAction === 'TABLE_CALL_PREPARED' && hasTableCall) {
+      // Delivery prepare — dedicated endpoint (+ auto-confirm when pending).
       if (isDeliveryCall && logId > 0) {
         const autoConfirm = await this.autoConfirmPendingDeliveryOrder(
           req,
@@ -474,6 +465,17 @@ export class StaffOrdersFlowService {
         if (autoConfirm) {
           return autoConfirm;
         }
+      }
+
+      if (!isDeliveryCall) {
+        return {
+          status: 403,
+          data: {
+            error: 'Prepare is not available for table orders',
+            errorAr: 'التحضير غير متاح لطلبات الطاولات',
+            code: 'STAFF_ACTION_DENIED',
+          },
+        };
       }
 
       upstream = await this.ensHttp.proxy({
@@ -509,19 +511,10 @@ export class StaffOrdersFlowService {
       });
     } else if (
       !isDeliveryCall &&
-      logId > 0 &&
-      normalizedAction === 'TABLE_CALL_DELIVERED'
+      (normalizedAction === 'TABLE_CALL_CONFIRMED' ||
+        normalizedAction === 'TABLE_CALL_CANCELLED')
     ) {
-      upstream = await this.ensHttp.proxy({
-        method: 'POST',
-        path: `menus/${resolvedMenuId}/activity-logs/${logId}/actions`,
-        req,
-        body: { action: normalizedAction },
-      });
-    } else if (
-      normalizedAction === 'TABLE_CALL_CONFIRMED' ||
-      normalizedAction === 'TABLE_CALL_CANCELLED'
-    ) {
+      // Fallback when activity-log id cannot be resolved yet.
       const status = orderStatusFromAction(normalizedAction);
       upstream = await this.ensHttp.proxy({
         method: 'PATCH',
@@ -734,11 +727,7 @@ export class StaffOrdersFlowService {
       };
     }
 
-    const creatorStaffId = this.resolveStaffId(req);
-    if (creatorStaffId > 0) {
-      this.tableOrderCreators.record(menuId, staffCallId, creatorStaffId);
-    }
-
+    // Creator registry / self-accept intentionally not recorded (Web parity).
     return this.presentOrderMutation(req, staffCallId, menuId);
   }
 
@@ -795,12 +784,31 @@ export class StaffOrdersFlowService {
       };
     }
 
-    const upstream = await this.ensHttp.proxy({
-      method: 'PATCH',
-      path: `staff-auth/table-calls/${staffCallId}/items`,
-      req,
-      body: { items },
-    });
+    const logId =
+      entry.activityLogId && entry.activityLogId > 0
+        ? entry.activityLogId
+        : await this.resolveActivityLogId(
+            req,
+            menuId,
+            staffCallId,
+            activityLogId,
+          );
+
+    // Prefer activity-logs items PATCH (Web parity) when log id is known.
+    const upstream =
+      logId > 0
+        ? await this.ensHttp.proxy({
+            method: 'PATCH',
+            path: `menus/${menuId}/activity-logs/${logId}/items`,
+            req,
+            body: { items },
+          })
+        : await this.ensHttp.proxy({
+            method: 'PATCH',
+            path: `staff-auth/table-calls/${staffCallId}/items`,
+            req,
+            body: { items },
+          });
 
     if (upstream.status >= 400) {
       return normalizeStaffUpstreamError(upstream);
@@ -810,7 +818,7 @@ export class StaffOrdersFlowService {
       req,
       staffCallId,
       menuId,
-      activityLogId,
+      logId > 0 ? logId : activityLogId,
     );
   }
 
@@ -868,8 +876,12 @@ export class StaffOrdersFlowService {
     };
   }
 
-  /** Table channel: always `staff-auth/table-calls` (+ history). Never activity-logs. */
-  private async listTableOrders(
+  /**
+   * Table channel — Web dashboard parity:
+   * `GET /menus/:menuId/activity-logs?channel=table` with status/date/search filters.
+   * Does not use staff-auth/table-calls as the primary list source.
+   */
+  private async listTableOrdersViaActivityLogs(
     req: Request,
     auth: StaffResolvedAuth,
     channel: StaffOrderChannel,
@@ -878,117 +890,91 @@ export class StaffOrdersFlowService {
     limit: number,
     query: Record<string, unknown>,
   ): Promise<EnsHttpResult> {
-    if (scope === 'history') {
-      return this.listTableHistory(
-        req,
-        auth,
-        channel,
-        page,
-        limit,
-        query,
-      );
+    const menuId = this.resolveMenuId(req, query);
+
+    if (menuId <= 0) {
+      return {
+        status: 404,
+        data: {
+          error: 'Menu not found',
+          errorAr: 'القائمة غير موجودة',
+          code: 'MENU_NOT_FOUND',
+        },
+      };
     }
 
-    const pendingUpstream = await this.ensHttp.proxy({
+    const upstreamQuery: Record<string, unknown> = {
+      page,
+      limit,
+      channel: 'table',
+      ...this.deliveryListQueryParams(query),
+    };
+
+    const upstream = await this.ensHttp.proxy({
       method: 'GET',
-      path: 'staff-auth/table-calls',
+      path: `menus/${menuId}/activity-logs`,
       req,
-      query: { limit: Math.min(limit, 100) },
+      query: upstreamQuery,
     });
 
-    if (pendingUpstream.status >= 400) {
+    if (upstream.status >= 400) {
       return rejectUpstreamListResult(
         this.logger,
-        'listTableOrders staff-auth/table-calls',
-        pendingUpstream,
+        'listTableOrdersViaActivityLogs menus/activity-logs',
+        upstream,
       );
     }
 
-    const pendingPayload = (pendingUpstream.data ?? {}) as Record<
-      string,
-      unknown
-    >;
-    const pendingRows = Array.isArray(pendingPayload.calls)
-      ? pendingPayload.calls
-      : [];
+    const payload = (upstream.data ?? {}) as Record<string, unknown>;
+    const rows = Array.isArray(payload.entries)
+      ? payload.entries
+      : Array.isArray(payload.calls)
+        ? payload.calls
+        : [];
 
-    const historyUpstream = await this.ensHttp.proxy({
-      method: 'GET',
-      path: 'staff-auth/table-calls/history',
-      req,
-      query: { page: 1, limit: 100 },
-    });
-
-    if (historyUpstream.status >= 400) {
-      return rejectUpstreamListResult(
-        this.logger,
-        'listTableOrders staff-auth/table-calls/history',
-        historyUpstream,
-      );
-    }
-
-    const historyPayload = (historyUpstream.data ?? {}) as Record<
-      string,
-      unknown
-    >;
-    const historyRows = Array.isArray(historyPayload.calls)
-      ? historyPayload.calls
-      : [];
-
-    const mergedRows: Record<string, unknown>[] = [];
-    const seenIds = new Set<number>();
-
-    for (const row of pendingRows) {
-      if (!row || typeof row !== 'object') continue;
-      const map = row as Record<string, unknown>;
-      if (isDeliveryUpstreamRow(map)) continue;
-      const id = Number(map.id ?? 0);
-      if (!Number.isFinite(id) || id <= 0 || seenIds.has(id)) continue;
-      seenIds.add(id);
-      mergedRows.push(map);
-    }
-
-    for (const row of historyRows) {
-      if (!row || typeof row !== 'object') continue;
-      const map = row as Record<string, unknown>;
-      if (isDeliveryUpstreamRow(map)) continue;
-      const status = String(map.status ?? '')
-        .trim()
-        .toLowerCase();
-      if (status !== 'confirmed' && status !== 'prepared') continue;
-      const id = Number(map.id ?? 0);
-      if (!Number.isFinite(id) || id <= 0 || seenIds.has(id)) continue;
-      seenIds.add(id);
-      mergedRows.push({
-        ...map,
-        at: map.requestedAt ?? map.at,
-        items: map.items ?? [],
-      });
-    }
-
-    let presented = mergedRows
+    let presented = rows
       .map((row) =>
-        this.presenter.presentTableCallRow(
+        this.presenter.presentListRow(
           row as Record<string, unknown>,
           auth,
+          channel,
         ),
       )
-      .filter((entry): entry is StaffPresentedOrderEntry => entry != null)
-      .filter((entry) => entry.channel === channel);
+      .filter((entry): entry is StaffPresentedOrderEntry => entry != null);
 
-    presented = await this.hydrateTableActiveListEntries(req, auth, presented);
+    presented = await this.hydrateListEntries(
+      req,
+      menuId,
+      auth,
+      channel,
+      presented,
+    );
 
-    presented = this.sortActiveTableEntries(presented);
-    presented = this.presenter.filterByScope(presented, scope);
-    presented = this.presenter.applyListScopeToEntries(presented, scope);
+    presented = await this.enrichEntriesActionDetailsFromActivityLogs(
+      req,
+      menuId,
+      presented,
+    );
 
-    const menuId = this.resolveMenuId(req, {});
-    presented = await this.enrichEntriesForStaff(req, menuId, auth, presented);
+    // Web uses status/date/search on one list (status=all by default).
+    // Only apply legacy scope=history narrowing when no explicit status filter.
+    const hasStatusFilter =
+      query.status !== undefined &&
+      query.status !== null &&
+      String(query.status).trim() !== '' &&
+      String(query.status).trim().toLowerCase() !== 'all';
 
-    const total = presented.length;
-    const start = (page - 1) * limit;
-    const paged = presented.slice(start, start + limit);
-    const totalPages = Math.max(1, Math.ceil(total / limit));
+    let entries = presented;
+    if (!hasStatusFilter && scope === 'history') {
+      entries = this.presenter.filterByScope(presented, 'history');
+    }
+
+    entries = await this.enrichEntriesForStaff(req, menuId, auth, entries);
+
+    const total = Number(payload.total ?? entries.length) || entries.length;
+    const totalPages =
+      Number(payload.totalPages ?? Math.ceil(total / limit)) ||
+      Math.max(1, Math.ceil(total / limit));
 
     return {
       status: 200,
@@ -999,7 +985,7 @@ export class StaffOrdersFlowService {
         roleId: auth.roleId,
         channel,
         scope,
-        entries: paged,
+        entries,
         total,
         page,
         limit,

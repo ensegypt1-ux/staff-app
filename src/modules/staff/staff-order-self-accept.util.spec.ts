@@ -44,6 +44,8 @@ function baseEntry(
       },
     ],
     canEditItems: true,
+    pendingGuestAddition: false,
+    pendingBillRequest: false,
     createdByStaffId: null,
     waitingForCashierApproval: false,
     ...overrides,

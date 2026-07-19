@@ -41,6 +41,8 @@ export type StaffPresentedOrderEntry = {
     actionDetails: StaffOrderActionDetail[];
     availableActions: StaffOrderActionSpec[];
     canEditItems: boolean;
+    pendingGuestAddition: boolean;
+    pendingBillRequest: boolean;
     createdByStaffId: number | null;
     waitingForCashierApproval: boolean;
 };

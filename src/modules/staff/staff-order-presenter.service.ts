@@ -64,7 +64,11 @@ export type StaffPresentedOrderEntry = {
   actionDetails: StaffOrderActionDetail[];
   availableActions: StaffOrderActionSpec[];
   canEditItems: boolean;
+  pendingGuestAddition: boolean;
+  pendingBillRequest: boolean;
+  /** @deprecated Staff-only self-accept — always null/false for Web parity. */
   createdByStaffId: number | null;
+  /** @deprecated Always false — self-accept removed for Web parity. */
   waitingForCashierApproval: boolean;
 };
 
@@ -211,6 +215,14 @@ export class StaffOrderPresenterService {
         base.actionDetails,
         overlay.actionDetails,
       ),
+      pendingGuestAddition:
+        base.pendingGuestAddition || overlay.pendingGuestAddition,
+      pendingBillRequest:
+        base.pendingBillRequest || overlay.pendingBillRequest,
+      availableActions: base.availableActions,
+      canEditItems: base.canEditItems,
+      createdByStaffId: null,
+      waitingForCashierApproval: false,
     };
   }
 
@@ -305,10 +317,13 @@ export class StaffOrderPresenterService {
   }): StaffPresentedOrderEntry {
     const totalPrice = this.resolveTotalPrice(input.raw, input.items);
     const itemCount = input.items.reduce((sum, line) => sum + line.quantity, 0);
+    const pendingGuestAddition = input.raw.pendingGuestAddition === true;
+    const pendingBillRequest = input.raw.pendingBillRequest === true;
     const availableActions = availableActionsForOrder(
       input.status,
       input.auth,
       input.channel,
+      { pendingGuestAddition },
     );
     const canEditItems = resolveCanEditItems(
       input.channel,
@@ -339,6 +354,8 @@ export class StaffOrderPresenterService {
       actionDetails: input.actionDetails,
       availableActions,
       canEditItems,
+      pendingGuestAddition,
+      pendingBillRequest,
       createdByStaffId: null,
       waitingForCashierApproval: false,
     };

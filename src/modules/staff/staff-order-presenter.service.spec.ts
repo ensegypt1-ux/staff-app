@@ -29,7 +29,8 @@ describe('StaffOrderPresenterService', () => {
 
     const preparer = presenter.capabilitiesFor(foodPreparerAuth());
     expect(preparer['orders:prepare']).toBe(true);
-    expect(preparer.canViewKitchen).toBe(true);
+    // Kitchen tab disabled for Web table parity.
+    expect(preparer.canViewKitchen).toBe(false);
 
     const cashier = presenter.capabilitiesFor(cashierAuth());
     expect(cashier['delivery:view']).toBe(true);
@@ -87,8 +88,8 @@ describe('StaffOrderPresenterService', () => {
     expect(entry!.canEditItems).toBe(false);
   });
 
-  it('cashier can edit table orders while pending or confirmed', () => {
-    for (const status of ['pending', 'confirmed'] as const) {
+  it('cashier can edit table orders while pending, confirmed, or prepared', () => {
+    for (const status of ['pending', 'confirmed', 'prepared'] as const) {
       const entry = presenter.presentTableCallRow(
         {
           id: 12,
@@ -100,17 +101,27 @@ describe('StaffOrderPresenterService', () => {
       );
       expect(entry!.canEditItems).toBe(true);
     }
+  });
 
-    const prepared = presenter.presentTableCallRow(
+  it('exposes pendingGuestAddition and Finish actions for table', () => {
+    const entry = presenter.presentListRow(
       {
-        id: 12,
-        status: 'prepared',
-        tableNumber: '1',
+        id: 50,
+        orderId: 12,
+        status: 'confirmed',
+        type: 'table',
+        pendingGuestAddition: true,
+        pendingBillRequest: true,
         items: [],
       },
       cashierAuth(),
+      'table',
     );
-    expect(prepared!.canEditItems).toBe(false);
+    expect(entry!.pendingGuestAddition).toBe(true);
+    expect(entry!.pendingBillRequest).toBe(true);
+    expect(entry!.availableActions.map((a) => a.action)).toEqual([
+      'TABLE_CALL_CONFIRMED',
+    ]);
   });
 
   it('canEditItems is false for delivered and cancelled table orders', () => {
@@ -128,8 +139,8 @@ describe('StaffOrderPresenterService', () => {
     }
   });
 
-  it('cashier can edit delivery orders while pending or confirmed', () => {
-    for (const status of ['pending', 'confirmed'] as const) {
+  it('cashier can edit delivery orders while pending, confirmed, or prepared', () => {
+    for (const status of ['pending', 'confirmed', 'prepared'] as const) {
       const entry = presenter.presentListRow(
         {
           id: 99,
@@ -144,19 +155,6 @@ describe('StaffOrderPresenterService', () => {
       expect(entry!.canEditItems).toBe(true);
       expect(entry!.channel).toBe('delivery');
     }
-
-    const prepared = presenter.presentListRow(
-      {
-        id: 99,
-        orderId: 20,
-        status: 'prepared',
-        type: 'delivery',
-        items: [],
-      },
-      cashierAuth(),
-      'delivery',
-    );
-    expect(prepared!.canEditItems).toBe(false);
   });
 
   it('canEditItems is false for delivery orders without delivery:view', () => {
