@@ -342,6 +342,16 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
                 body: { status },
             });
         }
+        else if (!isDeliveryCall &&
+            normalizedAction === 'TABLE_CALL_COMPLETED' &&
+            hasTableCall) {
+            upstream = await this.ensHttp.proxy({
+                method: 'PATCH',
+                path: `staff-auth/table-calls/${staffCallId}/complete`,
+                req,
+                body: {},
+            });
+        }
         else {
             return {
                 status: 403,
@@ -632,18 +642,20 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
             channel: 'table',
             ...this.deliveryListQueryParams(query),
         };
-        const [upstream, pendingCount] = await Promise.all([
-            this.ensHttp.proxy({
-                method: 'GET',
-                path: `menus/${menuId}/activity-logs`,
-                req,
-                query: upstreamQuery,
-            }),
-            this.resolveTableAttentionPendingCount(req, menuId),
-        ]);
+        const upstream = await this.ensHttp.proxy({
+            method: 'GET',
+            path: `menus/${menuId}/activity-logs`,
+            req,
+            query: upstreamQuery,
+        });
+        if ((0, staff_order_errors_util_1.isMenuAccessAuthorizationSoft404)(upstream)) {
+            (0, staff_order_errors_util_1.logUpstreamDenial)(this.logger, 'listTableOrdersViaActivityLogs menus/activity-logs soft-404 → table-calls fallback', upstream);
+            return this.listTableOrdersViaTableCallsFallback(req, auth, channel, scope, page, limit, query);
+        }
         if (upstream.status >= 400) {
             return (0, staff_order_errors_util_1.rejectUpstreamListResult)(this.logger, 'listTableOrdersViaActivityLogs menus/activity-logs', upstream);
         }
+        const pendingCount = await this.resolveTableAttentionPendingCount(req, menuId);
         const payload = (upstream.data ?? {});
         const rows = Array.isArray(payload.entries)
             ? payload.entries
@@ -699,14 +711,26 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
     async resolveTableAttentionPendingCount(req, menuId) {
         if (menuId <= 0)
             return 0;
-        const [activityLogRows, serviceTableCallRows] = await Promise.all([
-            this.fetchAllTableActivityLogRowsForAttention(req, menuId),
-            this.fetchPendingServiceTableCalls(req),
-        ]);
+        const activityScan = await this.fetchAllTableActivityLogRowsForAttention(req, menuId);
+        if (activityScan.soft404) {
+            return this.resolveTableAttentionPendingCountFromTableCalls(req);
+        }
+        const serviceTableCallRows = await this.fetchPendingServiceTableCalls(req);
         return (0, staff_order_attention_util_1.countTableAttentionAcrossSources)({
-            activityLogRows,
+            activityLogRows: activityScan.rows,
             serviceTableCallRows,
         });
+    }
+    async resolveTableAttentionPendingCountFromTableCalls(req) {
+        const pendingRows = await this.fetchAllPendingTableCallRows(req);
+        return (0, staff_order_attention_util_1.countAttentionEntries)(pendingRows.map((raw) => ({
+            status: String(raw.status ?? 'pending')
+                .trim()
+                .toLowerCase(),
+            pendingGuestAddition: raw.pendingGuestAddition === true,
+            pendingBillRequest: raw.pendingBillRequest === true,
+            requestKind: raw.requestKind == null ? undefined : String(raw.requestKind),
+        })));
     }
     async fetchAllTableActivityLogRowsForAttention(req, menuId) {
         const scanLimit = 100;
@@ -724,6 +748,10 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
                     channel: 'table',
                 },
             });
+            if ((0, staff_order_errors_util_1.isMenuAccessAuthorizationSoft404)(upstream)) {
+                (0, staff_order_errors_util_1.logUpstreamDenial)(this.logger, 'resolveTableAttentionPendingCount menus/activity-logs soft-404', upstream);
+                return { soft404: true, rows: [] };
+            }
             if (upstream.status >= 400) {
                 (0, staff_order_errors_util_1.logUpstreamDenial)(this.logger, 'resolveTableAttentionPendingCount menus/activity-logs', upstream);
                 break;
@@ -753,7 +781,7 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
             }
             upstreamPage += 1;
         }
-        return collected;
+        return { soft404: false, rows: collected };
     }
     async mergeServiceRequestsFromTableCalls(req, auth, channel, entries, query) {
         const pendingCalls = await this.fetchPendingServiceTableCalls(req);
@@ -931,6 +959,167 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
                 capabilities: this.presenter.capabilitiesFor(auth),
             },
         };
+    }
+    async listTableOrdersViaTableCallsFallback(req, auth, channel, scope, page, limit, query) {
+        if (scope === 'history') {
+            return this.listTableHistory(req, auth, channel, page, limit, query);
+        }
+        const [pendingRows, historyRows, pendingCount] = await Promise.all([
+            this.fetchAllPendingTableCallRows(req),
+            this.fetchTableCallHistoryRowsForFallback(req),
+            this.resolveTableAttentionPendingCountFromTableCalls(req),
+        ]);
+        const pendingIds = new Set(pendingRows
+            .map((raw) => Number(raw.id ?? 0))
+            .filter((id) => Number.isFinite(id) && id > 0));
+        const byId = new Map();
+        for (const raw of pendingRows) {
+            if ((0, staff_order_channel_util_1.isDeliveryUpstreamRow)(raw))
+                continue;
+            const presented = this.presenter.presentTableCallRow(raw, auth);
+            if (!presented)
+                continue;
+            byId.set(presented.staffCallId, presented);
+        }
+        for (const raw of historyRows) {
+            if ((0, staff_order_channel_util_1.isDeliveryUpstreamRow)(raw))
+                continue;
+            const id = Number(raw.id ?? 0);
+            if (pendingIds.has(id))
+                continue;
+            const presented = this.presenter.presentTableCallRow(raw, auth);
+            if (!presented)
+                continue;
+            byId.set(presented.staffCallId, presented);
+        }
+        let entries = [...byId.values()];
+        entries = this.presenter.filterByScope(entries, 'active');
+        entries = this.filterTableFallbackEntries(entries, query);
+        entries = await this.enrichEntriesForStaff(req, 0, auth, entries);
+        entries = this.presenter.applyListScopeToEntries(entries, 'active');
+        entries = (0, staff_order_attention_util_1.sortTableEntriesByAttention)(entries);
+        const total = entries.length;
+        const start = (page - 1) * limit;
+        const pageEntries = entries.slice(start, start + limit);
+        const totalPages = Math.max(1, Math.ceil(total / limit) || 1);
+        return {
+            status: 200,
+            data: {
+                staffJobRole: auth.staffJobRole,
+                permissions: auth.permissions,
+                roleName: auth.roleName,
+                roleId: auth.roleId,
+                channel,
+                scope,
+                entries: pageEntries,
+                total,
+                page,
+                limit,
+                totalPages,
+                pendingCount,
+                capabilities: this.presenter.capabilitiesFor(auth),
+            },
+        };
+    }
+    filterTableFallbackEntries(entries, query) {
+        const q = String(query.q ?? '')
+            .trim()
+            .toLowerCase();
+        const statusFilter = String(query.status ?? '')
+            .trim()
+            .toLowerCase();
+        const dateFrom = String(query.dateFrom ?? '').trim();
+        const dateTo = String(query.dateTo ?? '').trim();
+        return entries.filter((entry) => {
+            if (statusFilter &&
+                statusFilter !== 'all' &&
+                entry.status !== statusFilter) {
+                return false;
+            }
+            if (q) {
+                const table = (entry.tableNumber ?? '').toLowerCase();
+                const customer = (entry.customerName ?? '').toLowerCase();
+                if (!table.includes(q) && !customer.includes(q))
+                    return false;
+            }
+            if (dateFrom || dateTo) {
+                const day = (entry.createdAt ?? '').slice(0, 10);
+                if (dateFrom && day && day < dateFrom)
+                    return false;
+                if (dateTo && day && day > dateTo)
+                    return false;
+            }
+            return true;
+        });
+    }
+    async fetchAllPendingTableCallRows(req) {
+        const upstream = await this.ensHttp.proxy({
+            method: 'GET',
+            path: 'staff-auth/table-calls',
+            req,
+        });
+        if (upstream.status >= 400) {
+            (0, staff_order_errors_util_1.logUpstreamDenial)(this.logger, 'listTableOrdersViaTableCallsFallback staff-auth/table-calls', upstream);
+            return [];
+        }
+        const payload = (upstream.data ?? {});
+        const calls = Array.isArray(payload.calls) ? payload.calls : [];
+        const out = [];
+        for (const call of calls) {
+            if (!call || typeof call !== 'object')
+                continue;
+            const map = call;
+            if ((0, staff_order_channel_util_1.isDeliveryUpstreamRow)(map))
+                continue;
+            out.push(map);
+        }
+        return out;
+    }
+    async fetchTableCallHistoryRowsForFallback(req) {
+        const scanLimit = 50;
+        let upstreamPage = 1;
+        let scannedRows = 0;
+        const collected = [];
+        while (scannedRows < staff_table_history_filters_util_1.TABLE_HISTORY_MAX_SCAN_ROWS) {
+            const upstream = await this.ensHttp.proxy({
+                method: 'GET',
+                path: 'staff-auth/table-calls/history',
+                req,
+                query: {
+                    page: upstreamPage,
+                    limit: scanLimit,
+                },
+            });
+            if (upstream.status >= 400) {
+                (0, staff_order_errors_util_1.logUpstreamDenial)(this.logger, 'listTableOrdersViaTableCallsFallback staff-auth/table-calls/history', upstream);
+                break;
+            }
+            const payload = (upstream.data ?? {});
+            const rows = Array.isArray(payload.calls) ? payload.calls : [];
+            if (rows.length === 0)
+                break;
+            scannedRows += rows.length;
+            for (const row of rows) {
+                if (!row || typeof row !== 'object')
+                    continue;
+                const map = row;
+                if ((0, staff_order_channel_util_1.isDeliveryUpstreamRow)(map))
+                    continue;
+                const status = (0, staff_order_status_util_1.normalizeStaffOrderStatus)(map.status);
+                if ((0, staff_order_status_util_1.isActiveStaffOrderStatus)(status) ||
+                    (0, staff_order_status_util_1.isHistoryStaffOrderStatus)(status)) {
+                    collected.push(map);
+                }
+            }
+            const totalUpstream = Number(payload.total ?? 0);
+            const totalPagesUpstream = Number(payload.totalPages ?? 0) ||
+                (totalUpstream > 0 ? Math.ceil(totalUpstream / scanLimit) : 0);
+            if (upstreamPage >= totalPagesUpstream && rows.length < scanLimit) {
+                break;
+            }
+            upstreamPage += 1;
+        }
+        return collected;
     }
     async listTableHistory(req, auth, channel, page, limit, query) {
         const dateRange = (0, staff_table_history_filters_util_1.resolveTableHistoryDateRange)(query, 'history', channel);

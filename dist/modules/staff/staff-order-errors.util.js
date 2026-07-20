@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isMenuAccessAuthorizationSoft404 = isMenuAccessAuthorizationSoft404;
 exports.normalizeStaffUpstreamError = normalizeStaffUpstreamError;
 exports.deniedOrderResult = deniedOrderResult;
 exports.staffHistoryDeniedResult = staffHistoryDeniedResult;
@@ -16,6 +17,34 @@ const NOT_PENDING_MARKERS = [
     'not found or not pending',
     'callnotfoundornotpending',
 ];
+const MENU_ACCESS_SOFT_404_MARKERS = [
+    'menu not found',
+    'المنيو غير موجود',
+];
+const GENUINE_NOT_FOUND_CODES = new Set([
+    'ORDER_NOT_FOUND',
+    'ACTIVITY_LOG_NOT_FOUND',
+    'STAFF_CALL_NOT_FOUND',
+]);
+function isMenuAccessAuthorizationSoft404(result) {
+    if (result.status !== 404)
+        return false;
+    const data = result.data;
+    if (!data || typeof data !== 'object')
+        return false;
+    const body = data;
+    const code = String(body.code ?? '').trim().toUpperCase();
+    if (GENUINE_NOT_FOUND_CODES.has(code)) {
+        return false;
+    }
+    const haystack = [body.error, body.errorEn, body.errorAr, body.message]
+        .map((value) => String(value ?? '').trim().toLowerCase())
+        .filter((value) => value.length > 0)
+        .join(' | ');
+    if (!haystack)
+        return false;
+    return MENU_ACCESS_SOFT_404_MARKERS.some((marker) => haystack.includes(marker.toLowerCase()));
+}
 function normalizeStaffUpstreamError(result) {
     if (result.status < 400)
         return result;
@@ -63,6 +92,16 @@ function normalizeStaffUpstreamError(result) {
                 error: 'This order action is no longer available',
                 errorAr: 'هذا الإجراء لم يعد متاحاً على الطلب',
                 code: 'STAFF_ORDER_STATE_CHANGED',
+            },
+        };
+    }
+    if (isMenuAccessAuthorizationSoft404(result)) {
+        return {
+            status: 404,
+            data: {
+                error: String(body.error ?? body.errorEn ?? 'Menu not found'),
+                errorAr: String(body.errorAr ?? 'المنيو غير موجود'),
+                code: 'MENU_ACCESS_SOFT_404',
             },
         };
     }

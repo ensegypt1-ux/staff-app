@@ -12,6 +12,7 @@ import {
   StaffOrderActionType,
 } from './staff-order-actions.util';
 import {
+  isMenuAccessAuthorizationSoft404,
   logUpstreamDenial,
   normalizeStaffUpstreamError,
   rejectUpstreamListResult,
@@ -34,6 +35,7 @@ import {
 } from './staff-order-presenter.service';
 import { isDeliveryUpstreamRow } from './staff-order-channel.util';
 import {
+  countAttentionEntries,
   countTableAttentionAcrossSources,
   isMergeableServiceTableCall,
   sortTableEntriesByAttention,
@@ -42,6 +44,8 @@ import {
 import {
   orderStatusFromAction,
   isActiveStaffOrderStatus,
+  isHistoryStaffOrderStatus,
+  normalizeStaffOrderStatus,
 } from './staff-order-status.util';
 import {
   buildTableHistoryListResult,
@@ -528,6 +532,18 @@ export class StaffOrdersFlowService {
         req,
         body: { status },
       });
+    } else if (
+      !isDeliveryCall &&
+      normalizedAction === 'TABLE_CALL_COMPLETED' &&
+      hasTableCall
+    ) {
+      // Finish when activity-log id is unavailable (no dashboard:access soft path).
+      upstream = await this.ensHttp.proxy({
+        method: 'PATCH',
+        path: `staff-auth/table-calls/${staffCallId}/complete`,
+        req,
+        body: {},
+      });
     } else {
       return {
         status: 403,
@@ -916,16 +932,31 @@ export class StaffOrdersFlowService {
       ...this.deliveryListQueryParams(query),
     };
 
-    const [upstream, pendingCount] = await Promise.all([
-      this.ensHttp.proxy({
-        method: 'GET',
-        path: `menus/${menuId}/activity-logs`,
+    const upstream = await this.ensHttp.proxy({
+      method: 'GET',
+      path: `menus/${menuId}/activity-logs`,
+      req,
+      query: upstreamQuery,
+    });
+
+    // Staff with orders:view but without dashboard:access get a menu soft-404.
+    // Fall back to staff-auth table-calls — never map this to ORDER_NOT_FOUND.
+    if (isMenuAccessAuthorizationSoft404(upstream)) {
+      logUpstreamDenial(
+        this.logger,
+        'listTableOrdersViaActivityLogs menus/activity-logs soft-404 → table-calls fallback',
+        upstream,
+      );
+      return this.listTableOrdersViaTableCallsFallback(
         req,
-        query: upstreamQuery,
-      }),
-      // Badge count is global — never scoped to the current page or browse filters.
-      this.resolveTableAttentionPendingCount(req, menuId),
-    ]);
+        auth,
+        channel,
+        scope,
+        page,
+        limit,
+        query,
+      );
+    }
 
     if (upstream.status >= 400) {
       return rejectUpstreamListResult(
@@ -934,6 +965,12 @@ export class StaffOrdersFlowService {
         upstream,
       );
     }
+
+    // Badge count is global — never scoped to the current page or browse filters.
+    const pendingCount = await this.resolveTableAttentionPendingCount(
+      req,
+      menuId,
+    );
 
     const payload = (upstream.data ?? {}) as Record<string, unknown>;
     const rows = Array.isArray(payload.entries)
@@ -1032,6 +1069,7 @@ export class StaffOrdersFlowService {
    * Global table attention count for `pendingCount`.
    * Scans activity-logs (channel=table) without list page/limit/q/date/status
    * filters, then adds waiter/orphan-bill rows from staff-auth/table-calls.
+   * On menu-access soft-404, counts from staff-auth table-calls only.
    */
   private async resolveTableAttentionPendingCount(
     req: Request,
@@ -1039,21 +1077,44 @@ export class StaffOrdersFlowService {
   ): Promise<number> {
     if (menuId <= 0) return 0;
 
-    const [activityLogRows, serviceTableCallRows] = await Promise.all([
-      this.fetchAllTableActivityLogRowsForAttention(req, menuId),
-      this.fetchPendingServiceTableCalls(req),
-    ]);
+    const activityScan = await this.fetchAllTableActivityLogRowsForAttention(
+      req,
+      menuId,
+    );
+
+    if (activityScan.soft404) {
+      return this.resolveTableAttentionPendingCountFromTableCalls(req);
+    }
+
+    const serviceTableCallRows = await this.fetchPendingServiceTableCalls(req);
 
     return countTableAttentionAcrossSources({
-      activityLogRows,
+      activityLogRows: activityScan.rows,
       serviceTableCallRows,
     });
+  }
+
+  private async resolveTableAttentionPendingCountFromTableCalls(
+    req: Request,
+  ): Promise<number> {
+    const pendingRows = await this.fetchAllPendingTableCallRows(req);
+    return countAttentionEntries(
+      pendingRows.map((raw) => ({
+        status: String(raw.status ?? 'pending')
+          .trim()
+          .toLowerCase(),
+        pendingGuestAddition: raw.pendingGuestAddition === true,
+        pendingBillRequest: raw.pendingBillRequest === true,
+        requestKind:
+          raw.requestKind == null ? undefined : String(raw.requestKind),
+      })),
+    );
   }
 
   private async fetchAllTableActivityLogRowsForAttention(
     req: Request,
     menuId: number,
-  ): Promise<Record<string, unknown>[]> {
+  ): Promise<{ soft404: boolean; rows: Record<string, unknown>[] }> {
     const scanLimit = 100;
     let upstreamPage = 1;
     let scanned = 0;
@@ -1070,6 +1131,15 @@ export class StaffOrdersFlowService {
           channel: 'table',
         },
       });
+
+      if (isMenuAccessAuthorizationSoft404(upstream)) {
+        logUpstreamDenial(
+          this.logger,
+          'resolveTableAttentionPendingCount menus/activity-logs soft-404',
+          upstream,
+        );
+        return { soft404: true, rows: [] };
+      }
 
       if (upstream.status >= 400) {
         logUpstreamDenial(
@@ -1107,7 +1177,7 @@ export class StaffOrdersFlowService {
       upstreamPage += 1;
     }
 
-    return collected;
+    return { soft404: false, rows: collected };
   }
 
   /**
@@ -1365,6 +1435,212 @@ export class StaffOrdersFlowService {
         capabilities: this.presenter.capabilitiesFor(auth),
       },
     };
+  }
+
+  /**
+   * Table list fallback when activity-logs returns menu-access soft-404.
+   * Uses staff-auth table-calls (pending) + table-calls/history (lifecycle rows).
+   */
+  private async listTableOrdersViaTableCallsFallback(
+    req: Request,
+    auth: StaffResolvedAuth,
+    channel: StaffOrderChannel,
+    scope: Scope,
+    page: number,
+    limit: number,
+    query: Record<string, unknown>,
+  ): Promise<EnsHttpResult> {
+    if (scope === 'history') {
+      return this.listTableHistory(req, auth, channel, page, limit, query);
+    }
+
+    const [pendingRows, historyRows, pendingCount] = await Promise.all([
+      this.fetchAllPendingTableCallRows(req),
+      this.fetchTableCallHistoryRowsForFallback(req),
+      this.resolveTableAttentionPendingCountFromTableCalls(req),
+    ]);
+
+    const pendingIds = new Set(
+      pendingRows
+        .map((raw) => Number(raw.id ?? 0))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    );
+
+    const byId = new Map<number, StaffPresentedOrderEntry>();
+    for (const raw of pendingRows) {
+      if (isDeliveryUpstreamRow(raw)) continue;
+      const presented = this.presenter.presentTableCallRow(raw, auth);
+      if (!presented) continue;
+      byId.set(presented.staffCallId, presented);
+    }
+    for (const raw of historyRows) {
+      if (isDeliveryUpstreamRow(raw)) continue;
+      const id = Number(raw.id ?? 0);
+      if (pendingIds.has(id)) continue;
+      const presented = this.presenter.presentTableCallRow(raw, auth);
+      if (!presented) continue;
+      byId.set(presented.staffCallId, presented);
+    }
+
+    let entries = [...byId.values()];
+    entries = this.presenter.filterByScope(entries, 'active');
+    entries = this.filterTableFallbackEntries(entries, query);
+    entries = await this.enrichEntriesForStaff(req, 0, auth, entries);
+    entries = this.presenter.applyListScopeToEntries(entries, 'active');
+    entries = sortTableEntriesByAttention(entries);
+
+    const total = entries.length;
+    const start = (page - 1) * limit;
+    const pageEntries = entries.slice(start, start + limit);
+    const totalPages = Math.max(1, Math.ceil(total / limit) || 1);
+
+    return {
+      status: 200,
+      data: {
+        staffJobRole: auth.staffJobRole,
+        permissions: auth.permissions,
+        roleName: auth.roleName,
+        roleId: auth.roleId,
+        channel,
+        scope,
+        entries: pageEntries,
+        total,
+        page,
+        limit,
+        totalPages,
+        pendingCount,
+        capabilities: this.presenter.capabilitiesFor(auth),
+      },
+    };
+  }
+
+  private filterTableFallbackEntries(
+    entries: StaffPresentedOrderEntry[],
+    query: Record<string, unknown>,
+  ): StaffPresentedOrderEntry[] {
+    const q = String(query.q ?? '')
+      .trim()
+      .toLowerCase();
+    const statusFilter = String(query.status ?? '')
+      .trim()
+      .toLowerCase();
+    const dateFrom = String(query.dateFrom ?? '').trim();
+    const dateTo = String(query.dateTo ?? '').trim();
+
+    return entries.filter((entry) => {
+      if (
+        statusFilter &&
+        statusFilter !== 'all' &&
+        entry.status !== statusFilter
+      ) {
+        return false;
+      }
+
+      if (q) {
+        const table = (entry.tableNumber ?? '').toLowerCase();
+        const customer = (entry.customerName ?? '').toLowerCase();
+        if (!table.includes(q) && !customer.includes(q)) return false;
+      }
+
+      if (dateFrom || dateTo) {
+        const day = (entry.createdAt ?? '').slice(0, 10);
+        if (dateFrom && day && day < dateFrom) return false;
+        if (dateTo && day && day > dateTo) return false;
+      }
+
+      return true;
+    });
+  }
+
+  private async fetchAllPendingTableCallRows(
+    req: Request,
+  ): Promise<Record<string, unknown>[]> {
+    const upstream = await this.ensHttp.proxy({
+      method: 'GET',
+      path: 'staff-auth/table-calls',
+      req,
+    });
+    if (upstream.status >= 400) {
+      logUpstreamDenial(
+        this.logger,
+        'listTableOrdersViaTableCallsFallback staff-auth/table-calls',
+        upstream,
+      );
+      return [];
+    }
+
+    const payload = (upstream.data ?? {}) as Record<string, unknown>;
+    const calls = Array.isArray(payload.calls) ? payload.calls : [];
+    const out: Record<string, unknown>[] = [];
+    for (const call of calls) {
+      if (!call || typeof call !== 'object') continue;
+      const map = call as Record<string, unknown>;
+      if (isDeliveryUpstreamRow(map)) continue;
+      out.push(map);
+    }
+    return out;
+  }
+
+  private async fetchTableCallHistoryRowsForFallback(
+    req: Request,
+  ): Promise<Record<string, unknown>[]> {
+    const scanLimit = 50;
+    let upstreamPage = 1;
+    let scannedRows = 0;
+    const collected: Record<string, unknown>[] = [];
+
+    while (scannedRows < TABLE_HISTORY_MAX_SCAN_ROWS) {
+      const upstream = await this.ensHttp.proxy({
+        method: 'GET',
+        path: 'staff-auth/table-calls/history',
+        req,
+        query: {
+          page: upstreamPage,
+          limit: scanLimit,
+        },
+      });
+
+      if (upstream.status >= 400) {
+        logUpstreamDenial(
+          this.logger,
+          'listTableOrdersViaTableCallsFallback staff-auth/table-calls/history',
+          upstream,
+        );
+        break;
+      }
+
+      const payload = (upstream.data ?? {}) as Record<string, unknown>;
+      const rows = Array.isArray(payload.calls) ? payload.calls : [];
+      if (rows.length === 0) break;
+
+      scannedRows += rows.length;
+
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        const map = row as Record<string, unknown>;
+        if (isDeliveryUpstreamRow(map)) continue;
+        const status = normalizeStaffOrderStatus(map.status);
+        // Collect lifecycle rows; active vs history filtering happens later.
+        if (
+          isActiveStaffOrderStatus(status) ||
+          isHistoryStaffOrderStatus(status)
+        ) {
+          collected.push(map);
+        }
+      }
+
+      const totalUpstream = Number(payload.total ?? 0);
+      const totalPagesUpstream =
+        Number(payload.totalPages ?? 0) ||
+        (totalUpstream > 0 ? Math.ceil(totalUpstream / scanLimit) : 0);
+
+      if (upstreamPage >= totalPagesUpstream && rows.length < scanLimit) {
+        break;
+      }
+      upstreamPage += 1;
+    }
+
+    return collected;
   }
 
   private async listTableHistory(

@@ -40,6 +40,7 @@ export declare class StaffOrdersFlowService {
     getMenuCatalog(req: Request, query: Record<string, unknown>): Promise<EnsHttpResult>;
     private listTableOrdersViaActivityLogs;
     private resolveTableAttentionPendingCount;
+    private resolveTableAttentionPendingCountFromTableCalls;
     private fetchAllTableActivityLogRowsForAttention;
     private mergeServiceRequestsFromTableCalls;
     private shouldMergeServiceTableCalls;
@@ -47,6 +48,10 @@ export declare class StaffOrdersFlowService {
     private hydrateTableActiveListEntries;
     private resolveDetailListScope;
     private listDeliveryOrders;
+    private listTableOrdersViaTableCallsFallback;
+    private filterTableFallbackEntries;
+    private fetchAllPendingTableCallRows;
+    private fetchTableCallHistoryRowsForFallback;
     private listTableHistory;
     private deliveryListQueryParams;
     private presentOrderMutation;
