@@ -119,8 +119,32 @@ describe('StaffOrderPresenterService', () => {
     );
     expect(entry!.pendingGuestAddition).toBe(true);
     expect(entry!.pendingBillRequest).toBe(true);
+    expect(entry!.requestKind).toBe('order');
     expect(entry!.availableActions.map((a) => a.action)).toEqual([
       'TABLE_CALL_CONFIRMED',
+    ]);
+  });
+
+  it('presents waiter service rows with Accept/Reject and no edit', () => {
+    const entry = presenter.presentListRow(
+      {
+        id: 88,
+        orderId: 88,
+        tableNumber: '7',
+        requestKind: 'waiter',
+        status: 'pending',
+        items: [{ name: 'ignored', quantity: 1, price: 1 }],
+        at: '2026-07-20T10:00:00.000Z',
+      },
+      waiterAuth(),
+      'table',
+    );
+    expect(entry!.requestKind).toBe('waiter');
+    expect(entry!.items).toEqual([]);
+    expect(entry!.canEditItems).toBe(false);
+    expect(entry!.availableActions.map((a) => a.action)).toEqual([
+      'TABLE_CALL_CONFIRMED',
+      'TABLE_CALL_CANCELLED',
     ]);
   });
 

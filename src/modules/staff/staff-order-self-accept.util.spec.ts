@@ -17,6 +17,7 @@ function baseEntry(
     staffCallId: 10,
     activityLogId: null,
     channel: 'table',
+    requestKind: 'order',
     status: 'pending',
     statusLabel: { en: 'Pending', ar: 'قيد الانتظار' },
     tableNumber: '1',

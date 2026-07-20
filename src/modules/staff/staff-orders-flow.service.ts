@@ -34,6 +34,12 @@ import {
 } from './staff-order-presenter.service';
 import { isDeliveryUpstreamRow } from './staff-order-channel.util';
 import {
+  countTableAttentionAcrossSources,
+  isMergeableServiceTableCall,
+  sortTableEntriesByAttention,
+  TABLE_ATTENTION_COUNT_MAX_SCAN_ROWS,
+} from './staff-order-attention.util';
+import {
   orderStatusFromAction,
   isActiveStaffOrderStatus,
 } from './staff-order-status.util';
@@ -910,12 +916,16 @@ export class StaffOrdersFlowService {
       ...this.deliveryListQueryParams(query),
     };
 
-    const upstream = await this.ensHttp.proxy({
-      method: 'GET',
-      path: `menus/${menuId}/activity-logs`,
-      req,
-      query: upstreamQuery,
-    });
+    const [upstream, pendingCount] = await Promise.all([
+      this.ensHttp.proxy({
+        method: 'GET',
+        path: `menus/${menuId}/activity-logs`,
+        req,
+        query: upstreamQuery,
+      }),
+      // Badge count is global — never scoped to the current page or browse filters.
+      this.resolveTableAttentionPendingCount(req, menuId),
+    ]);
 
     if (upstream.status >= 400) {
       return rejectUpstreamListResult(
@@ -971,7 +981,29 @@ export class StaffOrdersFlowService {
 
     entries = await this.enrichEntriesForStaff(req, menuId, auth, entries);
 
-    const total = Number(payload.total ?? entries.length) || entries.length;
+    let mergedServiceCount = 0;
+    // Prepend service rows on page 1 only so later pages do not repeat them.
+    if (
+      page === 1 &&
+      scope !== 'history' &&
+      this.shouldMergeServiceTableCalls(query)
+    ) {
+      const merged = await this.mergeServiceRequestsFromTableCalls(
+        req,
+        auth,
+        channel,
+        entries,
+        query,
+      );
+      entries = merged.entries;
+      mergedServiceCount = merged.addedCount;
+    }
+
+    entries = sortTableEntriesByAttention(entries);
+
+    const upstreamTotal =
+      Number(payload.total ?? entries.length) || entries.length;
+    const total = upstreamTotal + mergedServiceCount;
     const totalPages =
       Number(payload.totalPages ?? Math.ceil(total / limit)) ||
       Math.max(1, Math.ceil(total / limit));
@@ -990,22 +1022,202 @@ export class StaffOrdersFlowService {
         page,
         limit,
         totalPages,
+        pendingCount,
         capabilities: this.presenter.capabilitiesFor(auth),
       },
     };
   }
 
-  private sortActiveTableEntries(
-    entries: StaffPresentedOrderEntry[],
-  ): StaffPresentedOrderEntry[] {
-    return [...entries].sort((a, b) => {
-      const aPending = a.status === 'pending' ? 0 : 1;
-      const bPending = b.status === 'pending' ? 0 : 1;
-      if (aPending !== bPending) return aPending - bPending;
-      const aTime = Date.parse(a.createdAt ?? '') || 0;
-      const bTime = Date.parse(b.createdAt ?? '') || 0;
-      return bTime - aTime;
+  /**
+   * Global table attention count for `pendingCount`.
+   * Scans activity-logs (channel=table) without list page/limit/q/date/status
+   * filters, then adds waiter/orphan-bill rows from staff-auth/table-calls.
+   */
+  private async resolveTableAttentionPendingCount(
+    req: Request,
+    menuId: number,
+  ): Promise<number> {
+    if (menuId <= 0) return 0;
+
+    const [activityLogRows, serviceTableCallRows] = await Promise.all([
+      this.fetchAllTableActivityLogRowsForAttention(req, menuId),
+      this.fetchPendingServiceTableCalls(req),
+    ]);
+
+    return countTableAttentionAcrossSources({
+      activityLogRows,
+      serviceTableCallRows,
     });
+  }
+
+  private async fetchAllTableActivityLogRowsForAttention(
+    req: Request,
+    menuId: number,
+  ): Promise<Record<string, unknown>[]> {
+    const scanLimit = 100;
+    let upstreamPage = 1;
+    let scanned = 0;
+    const collected: Record<string, unknown>[] = [];
+
+    while (scanned < TABLE_ATTENTION_COUNT_MAX_SCAN_ROWS) {
+      const upstream = await this.ensHttp.proxy({
+        method: 'GET',
+        path: `menus/${menuId}/activity-logs`,
+        req,
+        query: {
+          page: upstreamPage,
+          limit: scanLimit,
+          channel: 'table',
+        },
+      });
+
+      if (upstream.status >= 400) {
+        logUpstreamDenial(
+          this.logger,
+          'resolveTableAttentionPendingCount menus/activity-logs',
+          upstream,
+        );
+        break;
+      }
+
+      const payload = (upstream.data ?? {}) as Record<string, unknown>;
+      const rows = Array.isArray(payload.entries)
+        ? payload.entries
+        : Array.isArray(payload.calls)
+          ? payload.calls
+          : [];
+      if (rows.length === 0) break;
+
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        const map = row as Record<string, unknown>;
+        if (isDeliveryUpstreamRow(map)) continue;
+        collected.push(map);
+      }
+
+      scanned += rows.length;
+      const totalUpstream = Number(payload.total ?? 0);
+      const totalPagesUpstream =
+        Number(payload.totalPages ?? 0) ||
+        (totalUpstream > 0 ? Math.ceil(totalUpstream / scanLimit) : 0);
+
+      if (upstreamPage >= totalPagesUpstream || rows.length < scanLimit) {
+        break;
+      }
+      upstreamPage += 1;
+    }
+
+    return collected;
+  }
+
+  /**
+   * Merge waiter / orphan-bill pending rows from `staff-auth/table-calls`.
+   * Activity-logs `channel=table` intentionally excludes these requestKinds.
+   */
+  private async mergeServiceRequestsFromTableCalls(
+    req: Request,
+    auth: StaffResolvedAuth,
+    channel: StaffOrderChannel,
+    entries: StaffPresentedOrderEntry[],
+    query: Record<string, unknown>,
+  ): Promise<{ entries: StaffPresentedOrderEntry[]; addedCount: number }> {
+    const pendingCalls = await this.fetchPendingServiceTableCalls(req);
+    if (pendingCalls.length === 0) {
+      return { entries, addedCount: 0 };
+    }
+
+    const existingIds = new Set(
+      entries.map((entry) => entry.staffCallId).filter((id) => id > 0),
+    );
+
+    const q = String(query.q ?? '')
+      .trim()
+      .toLowerCase();
+    const dateFrom = String(query.dateFrom ?? '').trim();
+    const dateTo = String(query.dateTo ?? '').trim();
+
+    const added: StaffPresentedOrderEntry[] = [];
+    for (const raw of pendingCalls) {
+      const id = Number(raw.id ?? 0);
+      if (!Number.isFinite(id) || id <= 0 || existingIds.has(id)) continue;
+
+      const presented = this.presenter.presentListRow(
+        {
+          id,
+          orderId: id,
+          tableNumber: raw.tableNumber,
+          requestKind: raw.requestKind,
+          status: raw.status ?? 'pending',
+          customerName: raw.customerName,
+          items: [],
+          orderTotal: 0,
+          totalPrice: 0,
+          createdAt: raw.at ?? raw.createdAt ?? null,
+          at: raw.at ?? raw.createdAt ?? null,
+          pendingGuestAddition: false,
+          pendingBillRequest: false,
+        },
+        auth,
+        channel,
+      );
+      if (!presented) continue;
+
+      if (q) {
+        const table = (presented.tableNumber ?? '').toLowerCase();
+        const customer = (presented.customerName ?? '').toLowerCase();
+        if (!table.includes(q) && !customer.includes(q)) continue;
+      }
+
+      if (dateFrom || dateTo) {
+        const day = (presented.createdAt ?? '').slice(0, 10);
+        if (dateFrom && day && day < dateFrom) continue;
+        if (dateTo && day && day > dateTo) continue;
+      }
+
+      added.push(presented);
+      existingIds.add(id);
+    }
+
+    if (added.length === 0) {
+      return { entries, addedCount: 0 };
+    }
+
+    return {
+      entries: [...added, ...entries],
+      addedCount: added.length,
+    };
+  }
+
+  private shouldMergeServiceTableCalls(query: Record<string, unknown>): boolean {
+    const status = String(query.status ?? '')
+      .trim()
+      .toLowerCase();
+    if (!status || status === 'all') return true;
+    // Service rows are pending-only from Express table-calls.
+    return status === 'pending';
+  }
+
+  private async fetchPendingServiceTableCalls(
+    req: Request,
+  ): Promise<Record<string, unknown>[]> {
+    const upstream = await this.ensHttp.proxy({
+      method: 'GET',
+      path: 'staff-auth/table-calls',
+      req,
+    });
+    if (upstream.status >= 400) return [];
+
+    const payload = (upstream.data ?? {}) as Record<string, unknown>;
+    const calls = Array.isArray(payload.calls) ? payload.calls : [];
+    const out: Record<string, unknown>[] = [];
+    for (const call of calls) {
+      if (!call || typeof call !== 'object') continue;
+      const map = call as Record<string, unknown>;
+      if (isDeliveryUpstreamRow(map)) continue;
+      if (!isMergeableServiceTableCall(map)) continue;
+      out.push(map);
+    }
+    return out;
   }
 
   private async hydrateTableActiveListEntries(
@@ -1584,6 +1796,7 @@ export class StaffOrdersFlowService {
       page,
       limit,
       totalPages: 0,
+      pendingCount: 0,
       capabilities: this.presenter.capabilitiesFor(auth),
     };
   }

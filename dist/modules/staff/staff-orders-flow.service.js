@@ -19,6 +19,7 @@ const staff_capability_mapper_1 = require("./staff-capability.mapper");
 const staff_menu_scope_util_1 = require("./staff-menu-scope.util");
 const staff_order_presenter_service_1 = require("./staff-order-presenter.service");
 const staff_order_channel_util_1 = require("./staff-order-channel.util");
+const staff_order_attention_util_1 = require("./staff-order-attention.util");
 const staff_order_status_util_1 = require("./staff-order-status.util");
 const staff_table_history_filters_util_1 = require("./staff-table-history-filters.util");
 const staff_table_order_util_1 = require("./staff-table-order.util");
@@ -631,12 +632,15 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
             channel: 'table',
             ...this.deliveryListQueryParams(query),
         };
-        const upstream = await this.ensHttp.proxy({
-            method: 'GET',
-            path: `menus/${menuId}/activity-logs`,
-            req,
-            query: upstreamQuery,
-        });
+        const [upstream, pendingCount] = await Promise.all([
+            this.ensHttp.proxy({
+                method: 'GET',
+                path: `menus/${menuId}/activity-logs`,
+                req,
+                query: upstreamQuery,
+            }),
+            this.resolveTableAttentionPendingCount(req, menuId),
+        ]);
         if (upstream.status >= 400) {
             return (0, staff_order_errors_util_1.rejectUpstreamListResult)(this.logger, 'listTableOrdersViaActivityLogs menus/activity-logs', upstream);
         }
@@ -660,7 +664,17 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
             entries = this.presenter.filterByScope(presented, 'history');
         }
         entries = await this.enrichEntriesForStaff(req, menuId, auth, entries);
-        const total = Number(payload.total ?? entries.length) || entries.length;
+        let mergedServiceCount = 0;
+        if (page === 1 &&
+            scope !== 'history' &&
+            this.shouldMergeServiceTableCalls(query)) {
+            const merged = await this.mergeServiceRequestsFromTableCalls(req, auth, channel, entries, query);
+            entries = merged.entries;
+            mergedServiceCount = merged.addedCount;
+        }
+        entries = (0, staff_order_attention_util_1.sortTableEntriesByAttention)(entries);
+        const upstreamTotal = Number(payload.total ?? entries.length) || entries.length;
+        const total = upstreamTotal + mergedServiceCount;
         const totalPages = Number(payload.totalPages ?? Math.ceil(total / limit)) ||
             Math.max(1, Math.ceil(total / limit));
         return {
@@ -677,20 +691,157 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
                 page,
                 limit,
                 totalPages,
+                pendingCount,
                 capabilities: this.presenter.capabilitiesFor(auth),
             },
         };
     }
-    sortActiveTableEntries(entries) {
-        return [...entries].sort((a, b) => {
-            const aPending = a.status === 'pending' ? 0 : 1;
-            const bPending = b.status === 'pending' ? 0 : 1;
-            if (aPending !== bPending)
-                return aPending - bPending;
-            const aTime = Date.parse(a.createdAt ?? '') || 0;
-            const bTime = Date.parse(b.createdAt ?? '') || 0;
-            return bTime - aTime;
+    async resolveTableAttentionPendingCount(req, menuId) {
+        if (menuId <= 0)
+            return 0;
+        const [activityLogRows, serviceTableCallRows] = await Promise.all([
+            this.fetchAllTableActivityLogRowsForAttention(req, menuId),
+            this.fetchPendingServiceTableCalls(req),
+        ]);
+        return (0, staff_order_attention_util_1.countTableAttentionAcrossSources)({
+            activityLogRows,
+            serviceTableCallRows,
         });
+    }
+    async fetchAllTableActivityLogRowsForAttention(req, menuId) {
+        const scanLimit = 100;
+        let upstreamPage = 1;
+        let scanned = 0;
+        const collected = [];
+        while (scanned < staff_order_attention_util_1.TABLE_ATTENTION_COUNT_MAX_SCAN_ROWS) {
+            const upstream = await this.ensHttp.proxy({
+                method: 'GET',
+                path: `menus/${menuId}/activity-logs`,
+                req,
+                query: {
+                    page: upstreamPage,
+                    limit: scanLimit,
+                    channel: 'table',
+                },
+            });
+            if (upstream.status >= 400) {
+                (0, staff_order_errors_util_1.logUpstreamDenial)(this.logger, 'resolveTableAttentionPendingCount menus/activity-logs', upstream);
+                break;
+            }
+            const payload = (upstream.data ?? {});
+            const rows = Array.isArray(payload.entries)
+                ? payload.entries
+                : Array.isArray(payload.calls)
+                    ? payload.calls
+                    : [];
+            if (rows.length === 0)
+                break;
+            for (const row of rows) {
+                if (!row || typeof row !== 'object')
+                    continue;
+                const map = row;
+                if ((0, staff_order_channel_util_1.isDeliveryUpstreamRow)(map))
+                    continue;
+                collected.push(map);
+            }
+            scanned += rows.length;
+            const totalUpstream = Number(payload.total ?? 0);
+            const totalPagesUpstream = Number(payload.totalPages ?? 0) ||
+                (totalUpstream > 0 ? Math.ceil(totalUpstream / scanLimit) : 0);
+            if (upstreamPage >= totalPagesUpstream || rows.length < scanLimit) {
+                break;
+            }
+            upstreamPage += 1;
+        }
+        return collected;
+    }
+    async mergeServiceRequestsFromTableCalls(req, auth, channel, entries, query) {
+        const pendingCalls = await this.fetchPendingServiceTableCalls(req);
+        if (pendingCalls.length === 0) {
+            return { entries, addedCount: 0 };
+        }
+        const existingIds = new Set(entries.map((entry) => entry.staffCallId).filter((id) => id > 0));
+        const q = String(query.q ?? '')
+            .trim()
+            .toLowerCase();
+        const dateFrom = String(query.dateFrom ?? '').trim();
+        const dateTo = String(query.dateTo ?? '').trim();
+        const added = [];
+        for (const raw of pendingCalls) {
+            const id = Number(raw.id ?? 0);
+            if (!Number.isFinite(id) || id <= 0 || existingIds.has(id))
+                continue;
+            const presented = this.presenter.presentListRow({
+                id,
+                orderId: id,
+                tableNumber: raw.tableNumber,
+                requestKind: raw.requestKind,
+                status: raw.status ?? 'pending',
+                customerName: raw.customerName,
+                items: [],
+                orderTotal: 0,
+                totalPrice: 0,
+                createdAt: raw.at ?? raw.createdAt ?? null,
+                at: raw.at ?? raw.createdAt ?? null,
+                pendingGuestAddition: false,
+                pendingBillRequest: false,
+            }, auth, channel);
+            if (!presented)
+                continue;
+            if (q) {
+                const table = (presented.tableNumber ?? '').toLowerCase();
+                const customer = (presented.customerName ?? '').toLowerCase();
+                if (!table.includes(q) && !customer.includes(q))
+                    continue;
+            }
+            if (dateFrom || dateTo) {
+                const day = (presented.createdAt ?? '').slice(0, 10);
+                if (dateFrom && day && day < dateFrom)
+                    continue;
+                if (dateTo && day && day > dateTo)
+                    continue;
+            }
+            added.push(presented);
+            existingIds.add(id);
+        }
+        if (added.length === 0) {
+            return { entries, addedCount: 0 };
+        }
+        return {
+            entries: [...added, ...entries],
+            addedCount: added.length,
+        };
+    }
+    shouldMergeServiceTableCalls(query) {
+        const status = String(query.status ?? '')
+            .trim()
+            .toLowerCase();
+        if (!status || status === 'all')
+            return true;
+        return status === 'pending';
+    }
+    async fetchPendingServiceTableCalls(req) {
+        const upstream = await this.ensHttp.proxy({
+            method: 'GET',
+            path: 'staff-auth/table-calls',
+            req,
+        });
+        if (upstream.status >= 400)
+            return [];
+        const payload = (upstream.data ?? {});
+        const calls = Array.isArray(payload.calls) ? payload.calls : [];
+        const out = [];
+        for (const call of calls) {
+            if (!call || typeof call !== 'object')
+                continue;
+            const map = call;
+            if ((0, staff_order_channel_util_1.isDeliveryUpstreamRow)(map))
+                continue;
+            if (!(0, staff_order_attention_util_1.isMergeableServiceTableCall)(map))
+                continue;
+            out.push(map);
+        }
+        return out;
     }
     async hydrateTableActiveListEntries(req, auth, entries) {
         const sparse = entries.filter((entry) => entry.items.length === 0);
@@ -1097,6 +1248,7 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
             page,
             limit,
             totalPages: 0,
+            pendingCount: 0,
             capabilities: this.presenter.capabilitiesFor(auth),
         };
     }

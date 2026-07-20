@@ -39,7 +39,11 @@ export declare class StaffOrdersFlowService {
     resolveMenuSlug(req: Request): Promise<string | null>;
     getMenuCatalog(req: Request, query: Record<string, unknown>): Promise<EnsHttpResult>;
     private listTableOrdersViaActivityLogs;
-    private sortActiveTableEntries;
+    private resolveTableAttentionPendingCount;
+    private fetchAllTableActivityLogRowsForAttention;
+    private mergeServiceRequestsFromTableCalls;
+    private shouldMergeServiceTableCalls;
+    private fetchPendingServiceTableCalls;
     private hydrateTableActiveListEntries;
     private resolveDetailListScope;
     private listDeliveryOrders;

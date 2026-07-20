@@ -4,7 +4,9 @@ import { StaffOrderStatus } from './staff-order-status.util';
 import { StaffOrderChannel } from './staff-order-channel.util';
 import { StaffOrderActionDetail } from './staff-order-action-details.util';
 import { StaffJobRole } from './staff-job-role.util';
+import { StaffRequestKind } from './staff-order-attention.util';
 export type { StaffOrderChannel };
+export type { StaffRequestKind };
 export type StaffPresentedOrderItem = {
     menuItemId?: number | null;
     name: string;
@@ -20,6 +22,7 @@ export type StaffPresentedOrderEntry = {
     staffCallId: number;
     activityLogId: number | null;
     channel: StaffOrderChannel;
+    requestKind: StaffRequestKind;
     status: StaffOrderStatus;
     statusLabel: {
         en: string;
@@ -59,6 +62,7 @@ export type StaffPresentedListResult = {
     page: number;
     limit: number;
     totalPages: number;
+    pendingCount?: number;
     capabilities: StaffMappedCapabilities;
     filters?: {
         dateFrom: string;

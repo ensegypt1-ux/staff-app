@@ -27,8 +27,14 @@ import {
   StaffOrderActionDetail,
 } from './staff-order-action-details.util';
 import { StaffJobRole } from './staff-job-role.util';
+import {
+  isServiceRequestKind,
+  parseStaffRequestKind,
+  StaffRequestKind,
+} from './staff-order-attention.util';
 
 export type { StaffOrderChannel };
+export type { StaffRequestKind };
 
 export type StaffPresentedOrderItem = {
   menuItemId?: number | null;
@@ -46,6 +52,8 @@ export type StaffPresentedOrderEntry = {
   staffCallId: number;
   activityLogId: number | null;
   channel: StaffOrderChannel;
+  /** Guest intent — `waiter` / orphan `bill` come from table-calls merge. */
+  requestKind: StaffRequestKind;
   status: StaffOrderStatus;
   statusLabel: { en: string; ar: string };
   tableNumber: string | null;
@@ -88,6 +96,11 @@ export type StaffPresentedListResult = {
   page: number;
   limit: number;
   totalPages: number;
+  /**
+   * Global table attention badge count (not page-scoped).
+   * Present on table channel lists.
+   */
+  pendingCount?: number;
   capabilities: StaffMappedCapabilities;
   filters?: {
     dateFrom: string;
@@ -219,6 +232,11 @@ export class StaffOrderPresenterService {
         base.pendingGuestAddition || overlay.pendingGuestAddition,
       pendingBillRequest:
         base.pendingBillRequest || overlay.pendingBillRequest,
+      requestKind: isServiceRequestKind(base.requestKind)
+        ? base.requestKind
+        : isServiceRequestKind(overlay.requestKind)
+          ? overlay.requestKind
+          : base.requestKind,
       availableActions: base.availableActions,
       canEditItems: base.canEditItems,
       createdByStaffId: null,
@@ -319,23 +337,24 @@ export class StaffOrderPresenterService {
     const itemCount = input.items.reduce((sum, line) => sum + line.quantity, 0);
     const pendingGuestAddition = input.raw.pendingGuestAddition === true;
     const pendingBillRequest = input.raw.pendingBillRequest === true;
+    const requestKind = parseStaffRequestKind(input.raw.requestKind);
+    const isService = isServiceRequestKind(requestKind);
     const availableActions = availableActionsForOrder(
       input.status,
       input.auth,
       input.channel,
       { pendingGuestAddition },
     );
-    const canEditItems = resolveCanEditItems(
-      input.channel,
-      input.auth,
-      input.status,
-    );
+    const canEditItems =
+      !isService &&
+      resolveCanEditItems(input.channel, input.auth, input.status);
 
     return {
       id: String(input.activityLogId ?? input.staffCallId),
       staffCallId: input.staffCallId,
       activityLogId: input.activityLogId,
       channel: input.channel,
+      requestKind,
       status: input.status,
       statusLabel: statusLabelFor(input.status),
       tableNumber: this.stringOrNull(input.raw.tableNumber),
@@ -347,15 +366,15 @@ export class StaffOrderPresenterService {
       governorateNameAr: this.stringOrNull(input.raw.governorateNameAr),
       governorateNameEn: this.stringOrNull(input.raw.governorateNameEn),
       deliveryFee: this.numberOrNull(input.raw.deliveryFee),
-      items: input.items,
-      itemCount,
-      totalPrice,
+      items: isService ? [] : input.items,
+      itemCount: isService ? 0 : itemCount,
+      totalPrice: isService ? 0 : totalPrice,
       createdAt: this.resolveCreatedAt(input.actionDetails, input.raw),
       actionDetails: input.actionDetails,
       availableActions,
       canEditItems,
-      pendingGuestAddition,
-      pendingBillRequest,
+      pendingGuestAddition: isService ? false : pendingGuestAddition,
+      pendingBillRequest: isService ? false : pendingBillRequest,
       createdByStaffId: null,
       waitingForCashierApproval: false,
     };

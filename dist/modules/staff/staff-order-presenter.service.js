@@ -13,6 +13,7 @@ const staff_order_status_util_1 = require("./staff-order-status.util");
 const staff_order_channel_util_1 = require("./staff-order-channel.util");
 const staff_order_edit_permissions_util_1 = require("./staff-order-edit-permissions.util");
 const staff_order_action_details_util_1 = require("./staff-order-action-details.util");
+const staff_order_attention_util_1 = require("./staff-order-attention.util");
 let StaffOrderPresenterService = class StaffOrderPresenterService {
     capabilitiesFor(auth) {
         return auth.capabilities;
@@ -88,6 +89,11 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             actionDetails: (0, staff_order_action_details_util_1.pickRicherActionDetails)(base.actionDetails, overlay.actionDetails),
             pendingGuestAddition: base.pendingGuestAddition || overlay.pendingGuestAddition,
             pendingBillRequest: base.pendingBillRequest || overlay.pendingBillRequest,
+            requestKind: (0, staff_order_attention_util_1.isServiceRequestKind)(base.requestKind)
+                ? base.requestKind
+                : (0, staff_order_attention_util_1.isServiceRequestKind)(overlay.requestKind)
+                    ? overlay.requestKind
+                    : base.requestKind,
             availableActions: base.availableActions,
             canEditItems: base.canEditItems,
             createdByStaffId: null,
@@ -161,13 +167,17 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
         const itemCount = input.items.reduce((sum, line) => sum + line.quantity, 0);
         const pendingGuestAddition = input.raw.pendingGuestAddition === true;
         const pendingBillRequest = input.raw.pendingBillRequest === true;
+        const requestKind = (0, staff_order_attention_util_1.parseStaffRequestKind)(input.raw.requestKind);
+        const isService = (0, staff_order_attention_util_1.isServiceRequestKind)(requestKind);
         const availableActions = (0, staff_order_actions_util_1.availableActionsForOrder)(input.status, input.auth, input.channel, { pendingGuestAddition });
-        const canEditItems = (0, staff_order_edit_permissions_util_1.resolveCanEditItems)(input.channel, input.auth, input.status);
+        const canEditItems = !isService &&
+            (0, staff_order_edit_permissions_util_1.resolveCanEditItems)(input.channel, input.auth, input.status);
         return {
             id: String(input.activityLogId ?? input.staffCallId),
             staffCallId: input.staffCallId,
             activityLogId: input.activityLogId,
             channel: input.channel,
+            requestKind,
             status: input.status,
             statusLabel: (0, staff_order_actions_util_1.statusLabelFor)(input.status),
             tableNumber: this.stringOrNull(input.raw.tableNumber),
@@ -179,15 +189,15 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             governorateNameAr: this.stringOrNull(input.raw.governorateNameAr),
             governorateNameEn: this.stringOrNull(input.raw.governorateNameEn),
             deliveryFee: this.numberOrNull(input.raw.deliveryFee),
-            items: input.items,
-            itemCount,
-            totalPrice,
+            items: isService ? [] : input.items,
+            itemCount: isService ? 0 : itemCount,
+            totalPrice: isService ? 0 : totalPrice,
             createdAt: this.resolveCreatedAt(input.actionDetails, input.raw),
             actionDetails: input.actionDetails,
             availableActions,
             canEditItems,
-            pendingGuestAddition,
-            pendingBillRequest,
+            pendingGuestAddition: isService ? false : pendingGuestAddition,
+            pendingBillRequest: isService ? false : pendingBillRequest,
             createdByStaffId: null,
             waitingForCashierApproval: false,
         };
