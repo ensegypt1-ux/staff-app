@@ -48,7 +48,9 @@ import {
   isActiveStaffOrderStatus,
   isHistoryStaffOrderStatus,
   normalizeStaffOrderStatus,
+  resolveListEntryStatus,
 } from './staff-order-status.util';
+import { parseActionDetailsList } from './staff-order-action-details.util';
 import {
   buildTableHistoryListResult,
   filterEntriesByDateRange,
@@ -1440,6 +1442,7 @@ export class StaffOrdersFlowService {
       req,
       menuId,
       presented,
+      'delivery',
     );
 
     const scoped = this.presenter.applyListScopeToEntries(
@@ -1457,6 +1460,8 @@ export class StaffOrdersFlowService {
       Number(payload.totalPages ?? Math.ceil(total / limit)) ||
       Math.max(1, Math.ceil(total / limit));
 
+    const pendingCount = await this.resolveDeliveryPendingCount(req, menuId);
+
     return {
       status: 200,
       data: {
@@ -1471,6 +1476,7 @@ export class StaffOrdersFlowService {
         page,
         limit,
         totalPages,
+        pendingCount,
         capabilities: this.presenter.capabilitiesFor(auth),
       },
     };
@@ -1865,6 +1871,7 @@ export class StaffOrdersFlowService {
     req: Request,
     menuId: number,
     entries: StaffPresentedOrderEntry[],
+    channel: StaffOrderChannel = 'table',
   ): Promise<StaffPresentedOrderEntry[]> {
     if (entries.length === 0 || menuId <= 0) return entries;
 
@@ -1872,7 +1879,7 @@ export class StaffOrdersFlowService {
       method: 'GET',
       path: `menus/${menuId}/activity-logs`,
       req,
-      query: { page: 1, limit: 100, channel: 'table' },
+      query: { page: 1, limit: 100, channel },
     });
     if (upstream.status >= 400) {
       logUpstreamDenial(
@@ -1896,6 +1903,78 @@ export class StaffOrdersFlowService {
     );
 
     return this.presenter.enrichEntriesActionDetails(entries, logRows);
+  }
+
+  /**
+   * Global delivery pending badge count (status === pending).
+   * Scans activity-logs channel=delivery without list page/q/date/status filters.
+   */
+  private async resolveDeliveryPendingCount(
+    req: Request,
+    menuId: number,
+  ): Promise<number> {
+    if (menuId <= 0) return 0;
+
+    const scanLimit = 100;
+    let upstreamPage = 1;
+    let scanned = 0;
+    let pending = 0;
+
+    while (scanned < TABLE_ATTENTION_COUNT_MAX_SCAN_ROWS) {
+      const upstream = await this.ensHttp.proxy({
+        method: 'GET',
+        path: `menus/${menuId}/activity-logs`,
+        req,
+        query: {
+          page: upstreamPage,
+          limit: scanLimit,
+          channel: 'delivery',
+        },
+      });
+
+      if (upstream.status >= 400) {
+        logUpstreamDenial(
+          this.logger,
+          'resolveDeliveryPendingCount menus/activity-logs',
+          upstream,
+        );
+        break;
+      }
+
+      const payload = (upstream.data ?? {}) as Record<string, unknown>;
+      const rows = Array.isArray(payload.entries)
+        ? payload.entries
+        : Array.isArray(payload.calls)
+          ? payload.calls
+          : [];
+      if (rows.length === 0) break;
+
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        const map = row as Record<string, unknown>;
+        if (!isDeliveryUpstreamRow(map)) continue;
+        const status = resolveListEntryStatus({
+          actionDetails: parseActionDetailsList(map.actionDetails),
+          status: map.status as string | undefined,
+        });
+        if (status === 'pending') {
+          pending += 1;
+        }
+      }
+
+      scanned += rows.length;
+      const totalUpstream = Number(payload.total ?? 0);
+      const totalPagesUpstream =
+        Number(payload.totalPages ?? 0) ||
+        (totalUpstream > 0 ? Math.ceil(totalUpstream / scanLimit) : 0);
+
+      if (upstreamPage >= totalPagesUpstream || rows.length < scanLimit) {
+        break;
+      }
+      upstreamPage += 1;
+    }
+
+    return pending;
   }
 
   private async hydrateDeliveryListEntries(

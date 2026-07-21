@@ -36,6 +36,9 @@ export type StaffPresentedOrderEntry = {
     governorateId: number | null;
     governorateNameAr: string | null;
     governorateNameEn: string | null;
+    itemsSubtotal: number | null;
+    taxAmount: number | null;
+    serviceAmount: number | null;
     deliveryFee: number | null;
     items: StaffPresentedOrderItem[];
     itemCount: number;

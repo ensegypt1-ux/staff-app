@@ -21,6 +21,7 @@ const staff_order_presenter_service_1 = require("./staff-order-presenter.service
 const staff_order_channel_util_1 = require("./staff-order-channel.util");
 const staff_order_attention_util_1 = require("./staff-order-attention.util");
 const staff_order_status_util_1 = require("./staff-order-status.util");
+const staff_order_action_details_util_1 = require("./staff-order-action-details.util");
 const staff_table_history_filters_util_1 = require("./staff-table-history-filters.util");
 const staff_table_order_util_1 = require("./staff-table-order.util");
 const staff_table_order_creator_registry_1 = require("./staff-table-order-creator.registry");
@@ -964,12 +965,13 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
             .map((row) => this.presenter.presentListRow(row, auth, channel))
             .filter((entry) => entry != null);
         presented = await this.hydrateListEntries(req, menuId, auth, channel, presented);
-        presented = await this.enrichEntriesActionDetailsFromActivityLogs(req, menuId, presented);
+        presented = await this.enrichEntriesActionDetailsFromActivityLogs(req, menuId, presented, 'delivery');
         const scoped = this.presenter.applyListScopeToEntries(this.presenter.filterByScope(presented, scope), scope);
         const enriched = await this.enrichEntriesForStaff(req, menuId, auth, scoped);
         const total = Number(payload.total ?? enriched.length) || enriched.length;
         const totalPages = Number(payload.totalPages ?? Math.ceil(total / limit)) ||
             Math.max(1, Math.ceil(total / limit));
+        const pendingCount = await this.resolveDeliveryPendingCount(req, menuId);
         return {
             status: 200,
             data: {
@@ -984,6 +986,7 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
                 page,
                 limit,
                 totalPages,
+                pendingCount,
                 capabilities: this.presenter.capabilitiesFor(auth),
             },
         };
@@ -1273,14 +1276,14 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
             return entry;
         });
     }
-    async enrichEntriesActionDetailsFromActivityLogs(req, menuId, entries) {
+    async enrichEntriesActionDetailsFromActivityLogs(req, menuId, entries, channel = 'table') {
         if (entries.length === 0 || menuId <= 0)
             return entries;
         const upstream = await this.ensHttp.proxy({
             method: 'GET',
             path: `menus/${menuId}/activity-logs`,
             req,
-            query: { page: 1, limit: 100, channel: 'table' },
+            query: { page: 1, limit: 100, channel },
         });
         if (upstream.status >= 400) {
             (0, staff_order_errors_util_1.logUpstreamDenial)(this.logger, 'enrichEntriesActionDetailsFromActivityLogs menus/activity-logs', upstream);
@@ -1294,6 +1297,61 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
                 : [];
         const logRows = rows.filter((row) => row != null && typeof row === 'object');
         return this.presenter.enrichEntriesActionDetails(entries, logRows);
+    }
+    async resolveDeliveryPendingCount(req, menuId) {
+        if (menuId <= 0)
+            return 0;
+        const scanLimit = 100;
+        let upstreamPage = 1;
+        let scanned = 0;
+        let pending = 0;
+        while (scanned < staff_order_attention_util_1.TABLE_ATTENTION_COUNT_MAX_SCAN_ROWS) {
+            const upstream = await this.ensHttp.proxy({
+                method: 'GET',
+                path: `menus/${menuId}/activity-logs`,
+                req,
+                query: {
+                    page: upstreamPage,
+                    limit: scanLimit,
+                    channel: 'delivery',
+                },
+            });
+            if (upstream.status >= 400) {
+                (0, staff_order_errors_util_1.logUpstreamDenial)(this.logger, 'resolveDeliveryPendingCount menus/activity-logs', upstream);
+                break;
+            }
+            const payload = (upstream.data ?? {});
+            const rows = Array.isArray(payload.entries)
+                ? payload.entries
+                : Array.isArray(payload.calls)
+                    ? payload.calls
+                    : [];
+            if (rows.length === 0)
+                break;
+            for (const row of rows) {
+                if (!row || typeof row !== 'object')
+                    continue;
+                const map = row;
+                if (!(0, staff_order_channel_util_1.isDeliveryUpstreamRow)(map))
+                    continue;
+                const status = (0, staff_order_status_util_1.resolveListEntryStatus)({
+                    actionDetails: (0, staff_order_action_details_util_1.parseActionDetailsList)(map.actionDetails),
+                    status: map.status,
+                });
+                if (status === 'pending') {
+                    pending += 1;
+                }
+            }
+            scanned += rows.length;
+            const totalUpstream = Number(payload.total ?? 0);
+            const totalPagesUpstream = Number(payload.totalPages ?? 0) ||
+                (totalUpstream > 0 ? Math.ceil(totalUpstream / scanLimit) : 0);
+            if (upstreamPage >= totalPagesUpstream || rows.length < scanLimit) {
+                break;
+            }
+            upstreamPage += 1;
+        }
+        return pending;
     }
     async hydrateDeliveryListEntries(req, menuId, auth, entries) {
         const sparse = entries.filter((entry) => entry.channel === 'delivery' &&

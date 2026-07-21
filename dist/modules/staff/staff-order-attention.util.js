@@ -96,11 +96,11 @@ function countTableAttentionAcrossSources(input) {
         if (!activityLogRowNeedsAttention(row))
             continue;
         const id = resolveStaffCallIdFromListRow(row);
-        if (id > 0) {
-            if (countedIds.has(id))
-                continue;
-            countedIds.add(id);
-        }
+        if (id <= 0)
+            continue;
+        if (countedIds.has(id))
+            continue;
+        countedIds.add(id);
         count += 1;
     }
     for (const row of input.serviceTableCallRows) {
@@ -109,11 +109,11 @@ function countTableAttentionAcrossSources(input) {
         if (!isMergeableServiceTableCall(row))
             continue;
         const id = Number(row.id ?? 0);
-        if (Number.isFinite(id) && id > 0) {
-            if (countedIds.has(id))
-                continue;
-            countedIds.add(id);
-        }
+        if (!Number.isFinite(id) || id <= 0)
+            continue;
+        if (countedIds.has(id))
+            continue;
+        countedIds.add(id);
         count += 1;
     }
     return count;

@@ -436,4 +436,35 @@ describe('StaffOrderPresenterService', () => {
     expect(enriched[0]?.actionDetails[0]?.waiterName).toBe('Alice');
     expect(enriched[0]?.actionDetails[0]?.action).toBe('TABLE_CALL_CONFIRMED');
   });
+
+  it('exposes Express delivery charge fields on list rows', () => {
+    const entry = presenter.presentListRow(
+      {
+        id: 200,
+        orderId: 55,
+        type: 'delivery',
+        status: 'pending',
+        orderNotes: 'Ring twice',
+        itemsSubtotal: 10,
+        taxAmount: 1,
+        serviceAmount: 0.5,
+        deliveryFee: 2,
+        totalPrice: 13.5,
+        items: [{ name: 'Burger', quantity: 1, price: 10, notes: 'No onion' }],
+      },
+      cashierAuth(),
+      'delivery',
+    );
+    expect(entry!.orderNotes).toBe('Ring twice');
+    expect(entry!.itemsSubtotal).toBe(10);
+    expect(entry!.taxAmount).toBe(1);
+    expect(entry!.serviceAmount).toBe(0.5);
+    expect(entry!.deliveryFee).toBe(2);
+    expect(entry!.totalPrice).toBe(13.5);
+    expect(entry!.items[0]?.notes).toBe('No onion');
+    expect(entry!.availableActions.map((a) => a.action)).toEqual([
+      'TABLE_CALL_PREPARED',
+      'TABLE_CALL_CANCELLED',
+    ]);
+  });
 });

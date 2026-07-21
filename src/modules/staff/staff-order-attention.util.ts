@@ -138,10 +138,10 @@ export function countTableAttentionAcrossSources(input: {
     if (!row || typeof row !== 'object') continue;
     if (!activityLogRowNeedsAttention(row)) continue;
     const id = resolveStaffCallIdFromListRow(row);
-    if (id > 0) {
-      if (countedIds.has(id)) continue;
-      countedIds.add(id);
-    }
+    // Skip undedupable rows — counting id<=0 inflated the badge indefinitely.
+    if (id <= 0) continue;
+    if (countedIds.has(id)) continue;
+    countedIds.add(id);
     count += 1;
   }
 
@@ -149,10 +149,9 @@ export function countTableAttentionAcrossSources(input: {
     if (!row || typeof row !== 'object') continue;
     if (!isMergeableServiceTableCall(row)) continue;
     const id = Number(row.id ?? 0);
-    if (Number.isFinite(id) && id > 0) {
-      if (countedIds.has(id)) continue;
-      countedIds.add(id);
-    }
+    if (!Number.isFinite(id) || id <= 0) continue;
+    if (countedIds.has(id)) continue;
+    countedIds.add(id);
     count += 1;
   }
 

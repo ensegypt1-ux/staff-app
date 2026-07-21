@@ -52,6 +52,13 @@ function availableActionsForOrder(status, auth, channel = 'table', options = {})
         }
         switch (status) {
             case 'pending':
+                if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:prepare')) {
+                    push('TABLE_CALL_PREPARED');
+                }
+                if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:cancel')) {
+                    push('TABLE_CALL_CANCELLED');
+                }
+                break;
             case 'confirmed':
                 if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:prepare')) {
                     push('TABLE_CALL_PREPARED');

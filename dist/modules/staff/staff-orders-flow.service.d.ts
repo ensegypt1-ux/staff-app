@@ -57,6 +57,7 @@ export declare class StaffOrdersFlowService {
     private presentOrderMutation;
     private hydrateListEntries;
     private enrichEntriesActionDetailsFromActivityLogs;
+    private resolveDeliveryPendingCount;
     private hydrateDeliveryListEntries;
     private deliveryEntryNeedsHydration;
     private fetchActivityLogRaw;

@@ -89,6 +89,14 @@ export function availableActionsForOrder(
     }
     switch (status) {
       case 'pending':
+        if (staffHasPermission(auth, 'orders:prepare')) {
+          push('TABLE_CALL_PREPARED');
+        }
+        // Staff skips Accept; Reject remains available while pending.
+        if (staffHasPermission(auth, 'orders:cancel')) {
+          push('TABLE_CALL_CANCELLED');
+        }
+        break;
       case 'confirmed':
         if (staffHasPermission(auth, 'orders:prepare')) {
           push('TABLE_CALL_PREPARED');

@@ -65,6 +65,10 @@ export type StaffPresentedOrderEntry = {
   governorateId: number | null;
   governorateNameAr: string | null;
   governorateNameEn: string | null;
+  /** Express activity-log charge fields (delivery + table). */
+  itemsSubtotal: number | null;
+  taxAmount: number | null;
+  serviceAmount: number | null;
   deliveryFee: number | null;
   items: StaffPresentedOrderItem[];
   itemCount: number;
@@ -98,8 +102,8 @@ export type StaffPresentedListResult = {
   limit: number;
   totalPages: number;
   /**
-   * Global table attention badge count (not page-scoped).
-   * Present on table channel lists.
+   * Global attention badge count (not page-scoped).
+   * Table: attention rules. Delivery: pending delivery orders.
    */
   pendingCount?: number;
   capabilities: StaffMappedCapabilities;
@@ -243,6 +247,9 @@ export class StaffOrderPresenterService {
         base.governorateNameEn,
         overlay.governorateNameEn,
       ),
+      itemsSubtotal: base.itemsSubtotal ?? overlay.itemsSubtotal,
+      taxAmount: base.taxAmount ?? overlay.taxAmount,
+      serviceAmount: base.serviceAmount ?? overlay.serviceAmount,
       deliveryFee: base.deliveryFee ?? overlay.deliveryFee,
       items,
       itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
@@ -259,7 +266,7 @@ export class StaffOrderPresenterService {
         status,
         auth,
         base.channel,
-        { pendingGuestAddition },
+        { pendingGuestAddition, requestKind },
       ),
       canEditItems:
         !isService &&
@@ -390,6 +397,9 @@ export class StaffOrderPresenterService {
       governorateId: this.numberOrNull(input.raw.governorateId),
       governorateNameAr: this.stringOrNull(input.raw.governorateNameAr),
       governorateNameEn: this.stringOrNull(input.raw.governorateNameEn),
+      itemsSubtotal: this.numberOrNull(input.raw.itemsSubtotal),
+      taxAmount: this.numberOrNull(input.raw.taxAmount),
+      serviceAmount: this.numberOrNull(input.raw.serviceAmount),
       deliveryFee: this.numberOrNull(input.raw.deliveryFee),
       items: isService ? [] : input.items,
       itemCount: isService ? 0 : itemCount,

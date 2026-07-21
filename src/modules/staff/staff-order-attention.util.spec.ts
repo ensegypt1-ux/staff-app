@@ -30,6 +30,9 @@ function entry(
     governorateId: null,
     governorateNameAr: null,
     governorateNameEn: null,
+    itemsSubtotal: null,
+    taxAmount: null,
+    serviceAmount: null,
     deliveryFee: null,
     items: [],
     itemCount: 0,
@@ -306,5 +309,18 @@ describe('staff-order-attention.util', () => {
       serviceTableCallRows: [],
     });
     expect(count).toBe(2);
+  });
+
+  it('does not count undedupable activity-log rows with missing ids', () => {
+    const count = countTableAttentionAcrossSources({
+      activityLogRows: [
+        { status: 'pending' },
+        { id: 0, orderId: 0, status: 'pending' },
+        { id: 11, orderId: 11, status: 'pending' },
+      ],
+      serviceTableCallRows: [{ requestKind: 'waiter', status: 'pending' }],
+    });
+    // Only the row with a real staffCallId counts; service row without id skipped.
+    expect(count).toBe(1);
   });
 });

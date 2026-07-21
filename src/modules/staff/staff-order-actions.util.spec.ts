@@ -76,9 +76,21 @@ describe('availableActionsForOrder (Web table parity)', () => {
     expect(actions[0]?.label.en).toBe('Accept addition');
   });
 
-  it('delivery pending offers mark prepared when orders:prepare', () => {
+  it('delivery pending offers prepare and reject when permitted', () => {
     const actions = availableActionsForOrder(
       'pending',
+      cashierAuth(),
+      'delivery',
+    );
+    expect(actions.map((a) => a.action)).toEqual([
+      'TABLE_CALL_PREPARED',
+      'TABLE_CALL_CANCELLED',
+    ]);
+  });
+
+  it('delivery confirmed offers prepare only (no reject)', () => {
+    const actions = availableActionsForOrder(
+      'confirmed',
       cashierAuth(),
       'delivery',
     );
