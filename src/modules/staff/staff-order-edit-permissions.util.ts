@@ -9,8 +9,9 @@ import { StaffOrderStatus } from './staff-order-status.util';
 type AuthCaps = StaffResolvedAuth | StaffMappedCapabilities;
 
 /**
- * Mirrors Web `isEditableOrderStatus`: pending | confirmed | prepared
- * when `orders:edit_items` is granted. Delivery also requires `delivery:view`.
+ * Table: pending | confirmed | prepared (Web parity).
+ * Delivery: pending | confirmed only — hide edit once prepared.
+ * Delivery also requires `delivery:view`.
  */
 export function resolveCanEditItems(
   channel: StaffOrderChannel,
@@ -31,6 +32,10 @@ export function resolveCanEditItems(
 
   if (channel !== 'table' && channel !== 'delivery') {
     return false;
+  }
+
+  if (channel === 'delivery') {
+    return status === 'pending' || status === 'confirmed';
   }
 
   return (

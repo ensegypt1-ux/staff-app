@@ -269,7 +269,7 @@ export class StaffOrderPresenterService {
       pendingBillRequest,
       requestKind,
       status,
-      statusLabel: statusLabelFor(status),
+      statusLabel: statusLabelFor(status, base.channel),
       availableActions: availableActionsForOrder(
         status,
         auth,
@@ -396,7 +396,7 @@ export class StaffOrderPresenterService {
       channel: input.channel,
       requestKind,
       status: input.status,
-      statusLabel: statusLabelFor(input.status),
+      statusLabel: statusLabelFor(input.status, input.channel),
       tableNumber: this.stringOrNull(input.raw.tableNumber),
       customerName: this.stringOrNull(input.raw.customerName),
       customerPhone: this.stringOrNull(input.raw.customerPhone),

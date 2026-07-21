@@ -180,8 +180,8 @@ describe('StaffOrderPresenterService', () => {
     }
   });
 
-  it('cashier can edit delivery orders while pending, confirmed, or prepared', () => {
-    for (const status of ['pending', 'confirmed', 'prepared'] as const) {
+  it('cashier can edit delivery orders while pending or confirmed only', () => {
+    for (const status of ['pending', 'confirmed'] as const) {
       const entry = presenter.presentListRow(
         {
           id: 99,
@@ -196,6 +196,87 @@ describe('StaffOrderPresenterService', () => {
       expect(entry!.canEditItems).toBe(true);
       expect(entry!.channel).toBe('delivery');
     }
+  });
+
+  it('canEditItems is false for prepared delivery orders', () => {
+    const entry = presenter.presentListRow(
+      {
+        id: 99,
+        orderId: 20,
+        status: 'prepared',
+        type: 'delivery',
+        items: [],
+      },
+      cashierAuth(),
+      'delivery',
+    );
+    expect(entry!.canEditItems).toBe(false);
+  });
+
+  it('delivery status labels use approved Staff wording', () => {
+    const pending = presenter.presentListRow(
+      {
+        id: 1,
+        orderId: 1,
+        status: 'pending',
+        type: 'delivery',
+        items: [],
+      },
+      cashierAuth(),
+      'delivery',
+    );
+    expect(pending!.statusLabel).toEqual({ en: 'New', ar: 'جديد' });
+
+    const prepared = presenter.presentListRow(
+      {
+        id: 2,
+        orderId: 2,
+        status: 'prepared',
+        type: 'delivery',
+        items: [],
+      },
+      cashierAuth(),
+      'delivery',
+    );
+    expect(prepared!.statusLabel).toEqual({ en: 'Ready', ar: 'جاهز' });
+    expect(prepared!.availableActions[0]?.label).toEqual({
+      en: 'Mark as sent out',
+      ar: 'تم التسليم للمندوب',
+    });
+
+    const delivered = presenter.presentListRow(
+      {
+        id: 3,
+        orderId: 3,
+        status: 'delivered',
+        type: 'delivery',
+        items: [],
+      },
+      cashierAuth(),
+      'delivery',
+    );
+    expect(delivered!.statusLabel).toEqual({
+      en: 'Sent out',
+      ar: 'تم الإرسال',
+    });
+  });
+
+  it('delivery pending prepare action uses Start preparing copy', () => {
+    const entry = presenter.presentListRow(
+      {
+        id: 4,
+        orderId: 4,
+        status: 'pending',
+        type: 'delivery',
+        items: [],
+      },
+      cashierAuth(),
+      'delivery',
+    );
+    expect(entry!.availableActions[0]?.label).toEqual({
+      en: 'Start preparing',
+      ar: 'بدء التحضير',
+    });
   });
 
   it('canEditItems is false for delivery orders without delivery:view', () => {

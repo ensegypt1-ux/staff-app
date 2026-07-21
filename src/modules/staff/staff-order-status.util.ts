@@ -126,3 +126,16 @@ export const STAFF_ORDER_STATUS_LABELS: Record<
   delivered: { en: 'Delivered', ar: 'تم التسليم' },
   cancelled: { en: 'Rejected', ar: 'مرفوض' },
 };
+
+/** Staff App delivery wording — Express statuses unchanged. */
+export const STAFF_DELIVERY_ORDER_STATUS_LABELS: Record<
+  StaffOrderStatus,
+  { en: string; ar: string }
+> = {
+  pending: { en: 'New', ar: 'جديد' },
+  /** Internal backend stage — staff-facing same as New (no Accept step). */
+  confirmed: { en: 'New', ar: 'جديد' },
+  prepared: { en: 'Ready', ar: 'جاهز' },
+  delivered: { en: 'Sent out', ar: 'تم الإرسال' },
+  cancelled: { en: 'Rejected', ar: 'مرفوض' },
+};

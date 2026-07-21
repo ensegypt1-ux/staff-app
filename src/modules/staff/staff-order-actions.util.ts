@@ -6,6 +6,7 @@ import {
 import { StaffOrderChannel } from './staff-order-channel.util';
 import {
   StaffOrderStatus,
+  STAFF_DELIVERY_ORDER_STATUS_LABELS,
   STAFF_ORDER_STATUS_LABELS,
 } from './staff-order-status.util';
 
@@ -30,6 +31,18 @@ const ACTION_LABELS: Record<
   TABLE_CALL_PREPARED: { en: 'Mark prepared', ar: 'تم التحضير' },
   TABLE_CALL_DELIVERED: { en: 'Mark delivered', ar: 'تم التسليم' },
   TABLE_CALL_COMPLETED: { en: 'Finish', ar: 'إنهاء' },
+};
+
+/** Staff-facing delivery action copy (Express actions unchanged). */
+const DELIVERY_ACTION_LABELS: Partial<
+  Record<StaffOrderActionType, { en: string; ar: string }>
+> = {
+  TABLE_CALL_PREPARED: { en: 'Start preparing', ar: 'بدء التحضير' },
+  TABLE_CALL_DELIVERED: {
+    en: 'Mark as sent out',
+    ar: 'تم التسليم للمندوب',
+  },
+  TABLE_CALL_CANCELLED: { en: 'Reject', ar: 'رفض' },
 };
 
 const ACCEPT_ADDITION_LABEL = {
@@ -63,9 +76,11 @@ export function availableActionsForOrder(
     action: StaffOrderActionType,
     labelOverride?: { en: string; ar: string },
   ) => {
+    const deliveryLabel =
+      channel === 'delivery' ? DELIVERY_ACTION_LABELS[action] : undefined;
     specs.push({
       action,
-      label: labelOverride ?? ACTION_LABELS[action],
+      label: labelOverride ?? deliveryLabel ?? ACTION_LABELS[action],
     });
   };
 
@@ -167,10 +182,16 @@ export function canStaffViewHistory(auth: AuthCaps): boolean {
   return staffHasPermission(auth, 'orders:view');
 }
 
-export function statusLabelFor(status: StaffOrderStatus): {
+export function statusLabelFor(
+  status: StaffOrderStatus,
+  channel: StaffOrderChannel = 'table',
+): {
   en: string;
   ar: string;
 } {
+  if (channel === 'delivery') {
+    return STAFF_DELIVERY_ORDER_STATUS_LABELS[status];
+  }
   return STAFF_ORDER_STATUS_LABELS[status];
 }
 

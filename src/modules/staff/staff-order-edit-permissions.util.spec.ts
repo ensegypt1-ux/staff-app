@@ -15,13 +15,18 @@ describe('resolveCanEditItems (Web parity)', () => {
     expect(resolveCanEditItems('delivery', auth, 'pending')).toBe(false);
   });
 
-  it('cashier can edit table and delivery through prepared', () => {
+  it('cashier can edit delivery orders while pending or confirmed only', () => {
     const auth = cashierAuth();
-    for (const channel of ['table', 'delivery'] as const) {
-      expect(resolveCanEditItems(channel, auth, 'pending')).toBe(true);
-      expect(resolveCanEditItems(channel, auth, 'confirmed')).toBe(true);
-      expect(resolveCanEditItems(channel, auth, 'prepared')).toBe(true);
-    }
+    expect(resolveCanEditItems('delivery', auth, 'pending')).toBe(true);
+    expect(resolveCanEditItems('delivery', auth, 'confirmed')).toBe(true);
+    expect(resolveCanEditItems('delivery', auth, 'prepared')).toBe(false);
+  });
+
+  it('cashier can edit table through prepared', () => {
+    const auth = cashierAuth();
+    expect(resolveCanEditItems('table', auth, 'pending')).toBe(true);
+    expect(resolveCanEditItems('table', auth, 'confirmed')).toBe(true);
+    expect(resolveCanEditItems('table', auth, 'prepared')).toBe(true);
   });
 
   it('food_preparer without orders:edit_items cannot edit', () => {
