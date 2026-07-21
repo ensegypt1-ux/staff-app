@@ -5,14 +5,9 @@ import {
   EnsHttpService,
 } from '../../infrastructure/ens-backend/ens-http.service';
 import {
-  canPerformOrderAction,
-  canStaffViewDelivery,
-  canStaffViewHistory,
-  canStaffViewOrders,
-  StaffOrderActionType,
-} from './staff-order-actions.util';
-import {
+  isFinishConflictOrMenuUpstreamError,
   isMenuAccessAuthorizationSoft404,
+  isPostFinishHistoryPresentationFailure,
   logUpstreamDenial,
   normalizeStaffUpstreamError,
   rejectUpstreamListResult,
@@ -51,6 +46,14 @@ import {
   resolveListEntryStatus,
 } from './staff-order-status.util';
 import { parseActionDetailsList } from './staff-order-action-details.util';
+import {
+  canPerformOrderAction,
+  canStaffViewDelivery,
+  canStaffViewHistory,
+  canStaffViewOrders,
+  StaffOrderActionType,
+  statusLabelFor,
+} from './staff-order-actions.util';
 import {
   buildTableHistoryListResult,
   filterEntriesByDateRange,
@@ -490,14 +493,26 @@ export class StaffOrdersFlowService {
 
     let upstream: EnsHttpResult;
 
-    // Table channel (Web parity): all lifecycle actions via activity-logs.
+    // Table Finish: always staff-auth complete when a table-call exists.
+    // Never use activity-logs for table TABLE_CALL_COMPLETED in that case.
     if (
+      !isDeliveryCall &&
+      normalizedAction === 'TABLE_CALL_COMPLETED' &&
+      hasTableCall
+    ) {
+      upstream = await this.ensHttp.proxy({
+        method: 'PATCH',
+        path: `staff-auth/table-calls/${staffCallId}/complete`,
+        req,
+        body: {},
+      });
+    } else if (
       !isDeliveryCall &&
       logId > 0 &&
       (normalizedAction === 'TABLE_CALL_CONFIRMED' ||
-        normalizedAction === 'TABLE_CALL_CANCELLED' ||
-        normalizedAction === 'TABLE_CALL_COMPLETED')
+        normalizedAction === 'TABLE_CALL_CANCELLED')
     ) {
+      // Table channel (Web parity): confirm/cancel via activity-logs.
       upstream = await this.ensHttp.proxy({
         method: 'POST',
         path: `menus/${resolvedMenuId}/activity-logs/${logId}/actions`,
@@ -573,18 +588,6 @@ export class StaffOrdersFlowService {
         req,
         body: { status },
       });
-    } else if (
-      !isDeliveryCall &&
-      normalizedAction === 'TABLE_CALL_COMPLETED' &&
-      hasTableCall
-    ) {
-      // Finish when activity-log id is unavailable (no dashboard:access soft path).
-      upstream = await this.ensHttp.proxy({
-        method: 'PATCH',
-        path: `staff-auth/table-calls/${staffCallId}/complete`,
-        req,
-        body: {},
-      });
     } else {
       return {
         status: 403,
@@ -594,6 +597,30 @@ export class StaffOrdersFlowService {
           code: 'STAFF_ACTION_DENIED',
         },
       };
+    }
+
+    if (
+      !isDeliveryCall &&
+      normalizedAction === 'TABLE_CALL_COMPLETED' &&
+      hasTableCall
+    ) {
+      if (upstream.status < 400) {
+        return this.presentSuccessfulTableFinish(
+          req,
+          staffCallId,
+          resolvedMenuId,
+          activityLogId,
+          tableCallRaw,
+          upstream,
+        );
+      }
+      return this.resolveTableFinishAfterConflict(
+        req,
+        staffCallId,
+        resolvedMenuId,
+        upstream,
+        tableCallRaw,
+      );
     }
 
     if (upstream.status >= 400) {
@@ -606,6 +633,251 @@ export class StaffOrdersFlowService {
       resolvedMenuId,
       activityLogId,
     );
+  }
+
+  /**
+   * After upstream Finish succeeds: prefer rich presentation, then table-call
+   * presentation, then a minimal delivered ack that does not require history.
+   */
+  private async presentSuccessfulTableFinish(
+    req: Request,
+    staffCallId: number,
+    menuId: number,
+    activityLogId: number | undefined,
+    preFinishRaw: Record<string, unknown> | null,
+    upstream: EnsHttpResult,
+  ): Promise<EnsHttpResult> {
+    const rich = await this.presentOrderMutation(
+      req,
+      staffCallId,
+      menuId,
+      activityLogId,
+    );
+    if (rich.status < 400) {
+      return rich;
+    }
+
+    if (!isPostFinishHistoryPresentationFailure(rich)) {
+      return rich;
+    }
+
+    return this.presentDeliveredFinishWithFallback(
+      req,
+      staffCallId,
+      menuId,
+      activityLogId,
+      preFinishRaw,
+      upstream,
+    );
+  }
+
+  /**
+   * One follow-up GET after Finish conflict / menu soft-error.
+   * If the table-call is already delivered, treat Finish as success (HTTP 200).
+   */
+  private async resolveTableFinishAfterConflict(
+    req: Request,
+    staffCallId: number,
+    menuId: number,
+    upstream: EnsHttpResult,
+    preFinishRaw?: Record<string, unknown> | null,
+  ): Promise<EnsHttpResult> {
+    if (!isFinishConflictOrMenuUpstreamError(upstream)) {
+      return normalizeStaffUpstreamError(upstream);
+    }
+
+    const raw = await this.fetchTableCallRaw(req, staffCallId);
+    if (!raw) {
+      return {
+        status: 404,
+        data: {
+          error: 'Order not found',
+          errorAr: 'الطلب غير موجود',
+          code: 'ORDER_NOT_FOUND',
+        },
+      };
+    }
+
+    const status = normalizeStaffOrderStatus(raw.status);
+    if (status === 'delivered') {
+      return this.presentDeliveredFinishWithFallback(
+        req,
+        staffCallId,
+        menuId,
+        undefined,
+        preFinishRaw ?? raw,
+        upstream,
+      );
+    }
+
+    if (isActiveStaffOrderStatus(status)) {
+      return {
+        status: 409,
+        data: {
+          error: 'This order action is no longer available',
+          errorAr: 'هذا الإجراء لم يعد متاحاً على الطلب',
+          code: 'STAFF_ORDER_STATE_CHANGED',
+        },
+      };
+    }
+
+    return {
+      status: 409,
+      data: {
+        error: 'This order action is no longer available',
+        errorAr: 'هذا الإجراء لم يعد متاحاً على الطلب',
+        code: 'STAFF_ORDER_STATE_CHANGED',
+      },
+    };
+  }
+
+  private async presentDeliveredFinishWithFallback(
+    req: Request,
+    staffCallId: number,
+    menuId: number,
+    activityLogId: number | undefined,
+    preFinishRaw: Record<string, unknown> | null | undefined,
+    upstream: EnsHttpResult,
+  ): Promise<EnsHttpResult> {
+    const fetched = await this.fetchTableCallRaw(req, staffCallId);
+    const raw =
+      fetched ??
+      (preFinishRaw
+        ? { ...preFinishRaw, status: 'delivered' }
+        : null);
+
+    if (raw) {
+      const presented = await this.presentDeliveredFinishSuccess(req, menuId, {
+        ...raw,
+        status: 'delivered',
+      });
+      if (presented.status < 400) {
+        return presented;
+      }
+    }
+
+    return this.minimalDeliveredFinishSuccess(
+      req,
+      staffCallId,
+      activityLogId,
+      preFinishRaw ?? fetched,
+      upstream,
+    );
+  }
+
+  /** Present a delivered table-call after Finish without the history gate. */
+  private async presentDeliveredFinishSuccess(
+    req: Request,
+    menuId: number,
+    tableRaw: Record<string, unknown>,
+  ): Promise<EnsHttpResult> {
+    const auth = await this.resolveStaffAuth(req);
+    const entry = this.presenter.presentDetail(tableRaw, auth);
+    if (!entry) {
+      return {
+        status: 404,
+        data: {
+          error: 'Order not found',
+          errorAr: 'الطلب غير موجود',
+          code: 'ORDER_NOT_FOUND',
+        },
+      };
+    }
+
+    let scopedEntry = this.presenter.applyListScope(entry, 'history');
+    scopedEntry = await this.enrichEntryForStaff(
+      req,
+      menuId,
+      auth,
+      scopedEntry,
+    );
+
+    return {
+      status: 200,
+      data: {
+        staffJobRole: auth.staffJobRole,
+        permissions: auth.permissions,
+        roleName: auth.roleName,
+        roleId: auth.roleId,
+        entry: { ...scopedEntry, status: 'delivered' },
+        actions: [],
+        capabilities: this.presenter.capabilitiesFor(auth),
+      },
+    };
+  }
+
+  /**
+   * Minimal Finish ack when rich presentation is blocked by history permissions.
+   * Does not require orders:history or dashboard:access.
+   */
+  private async minimalDeliveredFinishSuccess(
+    req: Request,
+    staffCallId: number,
+    activityLogId: number | undefined,
+    identityRaw: Record<string, unknown> | null | undefined,
+    upstream: EnsHttpResult,
+  ): Promise<EnsHttpResult> {
+    const auth = await this.resolveStaffAuth(req);
+    const upstreamBody =
+      upstream.data && typeof upstream.data === 'object'
+        ? (upstream.data as Record<string, unknown>)
+        : {};
+    const tableNumber =
+      identityRaw?.tableNumber != null
+        ? String(identityRaw.tableNumber)
+        : null;
+    const customerName =
+      identityRaw?.customerName != null
+        ? String(identityRaw.customerName)
+        : null;
+    const logId =
+      activityLogId && activityLogId > 0
+        ? activityLogId
+        : Number(identityRaw?.activityLogId ?? 0) || null;
+
+    return {
+      status: 200,
+      data: {
+        staffJobRole: auth.staffJobRole,
+        permissions: auth.permissions,
+        roleName: auth.roleName,
+        roleId: auth.roleId,
+        entry: {
+          id: String(logId ?? staffCallId),
+          staffCallId,
+          activityLogId: logId && logId > 0 ? logId : null,
+          channel: 'table',
+          requestKind: 'order',
+          status: 'delivered',
+          statusLabel: statusLabelFor('delivered'),
+          items: [],
+          itemCount: 0,
+          totalPrice: Number(identityRaw?.orderTotal ?? identityRaw?.totalPrice ?? 0) || 0,
+          availableActions: [],
+          canEditItems: false,
+          tableNumber,
+          customerName,
+          customerPhone:
+            identityRaw?.customerPhone != null
+              ? String(identityRaw.customerPhone)
+              : null,
+          customerAddress: null,
+          orderNotes: null,
+          createdAt:
+            identityRaw?.createdAt != null
+              ? String(identityRaw.createdAt)
+              : null,
+          actionDetails: [],
+          pendingGuestAddition: false,
+          pendingBillRequest: false,
+          createdByStaffId: null,
+        },
+        actions: [],
+        capabilities: this.presenter.capabilitiesFor(auth),
+        finishAcknowledged: true,
+        upstreamStatus: upstreamBody.status ?? 'delivered',
+      },
+    };
   }
 
   /** Delivery orders skip explicit accept in staff app — confirm before prepare. */
