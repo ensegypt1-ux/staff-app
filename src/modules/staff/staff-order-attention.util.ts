@@ -1,5 +1,13 @@
+import {
+  buildActionDetailsFromActions,
+  parseActionDetailsList,
+  pickRicherActionDetails,
+} from './staff-order-action-details.util';
 import { StaffPresentedOrderEntry } from './staff-order-presenter.service';
-import { StaffOrderStatus } from './staff-order-status.util';
+import {
+  resolveListEntryStatus,
+  StaffOrderStatus,
+} from './staff-order-status.util';
 
 export type StaffRequestKind = 'order' | 'waiter' | 'bill';
 
@@ -108,14 +116,36 @@ export function resolveStaffCallIdFromListRow(
   return Number.isFinite(id) && id > 0 ? id : 0;
 }
 
+/**
+ * Resolve activity-log list status the same way as the presenter/Web:
+ * parse actionDetails (+ actions), then resolveListEntryStatus.
+ * Never invent "pending" when top-level status is missing.
+ */
+export function resolveActivityLogRowStatus(
+  raw: Record<string, unknown>,
+): StaffOrderStatus {
+  const fromList = parseActionDetailsList(raw.actionDetails);
+  const fromActions = buildActionDetailsFromActions(raw.actions);
+  const actionDetails = pickRicherActionDetails(fromActions, fromList);
+
+  const topLevelRaw = raw.status;
+  const topLevel =
+    topLevelRaw == null || String(topLevelRaw).trim() === ''
+      ? undefined
+      : String(topLevelRaw).trim();
+
+  return resolveListEntryStatus({
+    actionDetails,
+    status: topLevel,
+  });
+}
+
 /** Read attention flags from an upstream activity-log / table-call row. */
 export function activityLogRowNeedsAttention(
   raw: Record<string, unknown>,
 ): boolean {
   return entryNeedsAttention({
-    status: String(raw.status ?? 'pending')
-      .trim()
-      .toLowerCase(),
+    status: resolveActivityLogRowStatus(raw),
     pendingGuestAddition: raw.pendingGuestAddition === true,
     pendingBillRequest: raw.pendingBillRequest === true,
     requestKind: parseStaffRequestKind(raw.requestKind),

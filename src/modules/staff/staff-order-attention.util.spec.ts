@@ -200,6 +200,83 @@ describe('staff-order-attention.util', () => {
     ).toBe(false);
   });
 
+  it('resolves status from actionDetails when top-level status is missing', () => {
+    // Regression: finished/completed activity-log rows often omit top-level status.
+    expect(
+      activityLogRowNeedsAttention({
+        orderId: 10,
+        actionDetails: [
+          { status: 'pending' },
+          { status: 'confirmed' },
+          { status: 'prepared' },
+          { action: 'TABLE_CALL_COMPLETED', status: 'delivered' },
+        ],
+      }),
+    ).toBe(false);
+
+    expect(
+      activityLogRowNeedsAttention({
+        orderId: 11,
+        actionDetails: [
+          { status: 'pending' },
+          { status: 'confirmed' },
+          { status: 'prepared' },
+        ],
+      }),
+    ).toBe(false);
+
+    expect(
+      activityLogRowNeedsAttention({
+        orderId: 12,
+        actionDetails: [{ status: 'cancelled' }],
+      }),
+    ).toBe(false);
+
+    expect(
+      activityLogRowNeedsAttention({
+        orderId: 13,
+        actionDetails: [{ status: 'pending' }],
+      }),
+    ).toBe(true);
+
+    // Confirmed via timeline still counts when guest/bill attention remains.
+    expect(
+      activityLogRowNeedsAttention({
+        orderId: 14,
+        pendingGuestAddition: true,
+        actionDetails: [
+          { status: 'pending' },
+          { status: 'confirmed' },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it('never treats missing top-level status as pending when timeline is closed', () => {
+    const count = countTableAttentionAcrossSources({
+      activityLogRows: [
+        {
+          id: 1,
+          orderId: 1,
+          // no top-level status — previously incorrectly counted as pending
+          actionDetails: [
+            { status: 'pending' },
+            { status: 'confirmed' },
+            { status: 'prepared' },
+            { action: 'TABLE_CALL_COMPLETED', status: 'delivered' },
+          ],
+        },
+        {
+          id: 2,
+          orderId: 2,
+          actionDetails: [{ status: 'pending' }],
+        },
+      ],
+      serviceTableCallRows: [],
+    });
+    expect(count).toBe(1);
+  });
+
   it('resolveStaffCallIdFromListRow prefers orderId', () => {
     expect(resolveStaffCallIdFromListRow({ id: 99, orderId: 42 })).toBe(42);
     expect(resolveStaffCallIdFromListRow({ id: 7 })).toBe(7);
