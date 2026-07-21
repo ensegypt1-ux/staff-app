@@ -261,7 +261,7 @@ describe('StaffOrderPresenterService', () => {
     });
   });
 
-  it('delivery pending prepare action uses Start preparing copy', () => {
+  it('delivery pending accept action uses Accept copy (Web parity)', () => {
     const entry = presenter.presentListRow(
       {
         id: 4,
@@ -273,9 +273,34 @@ describe('StaffOrderPresenterService', () => {
       cashierAuth(),
       'delivery',
     );
+    expect(entry!.availableActions.map((a) => a.action)).toEqual([
+      'TABLE_CALL_CONFIRMED',
+      'TABLE_CALL_CANCELLED',
+    ]);
     expect(entry!.availableActions[0]?.label).toEqual({
-      en: 'Start preparing',
-      ar: 'بدء التحضير',
+      en: 'Accept',
+      ar: 'قبول',
+    });
+  });
+
+  it('delivery confirmed prepare action uses Mark prepared / تم التحضير', () => {
+    const entry = presenter.presentListRow(
+      {
+        id: 5,
+        orderId: 5,
+        status: 'confirmed',
+        type: 'delivery',
+        items: [],
+      },
+      cashierAuth(),
+      'delivery',
+    );
+    expect(entry!.availableActions.map((a) => a.action)).toEqual([
+      'TABLE_CALL_PREPARED',
+    ]);
+    expect(entry!.availableActions[0]?.label).toEqual({
+      en: 'Mark prepared',
+      ar: 'تم التحضير',
     });
   });
 
@@ -552,7 +577,7 @@ describe('StaffOrderPresenterService', () => {
     expect(entry!.totalPrice).toBe(13.5);
     expect(entry!.items[0]?.notes).toBe('No onion');
     expect(entry!.availableActions.map((a) => a.action)).toEqual([
-      'TABLE_CALL_PREPARED',
+      'TABLE_CALL_CONFIRMED',
       'TABLE_CALL_CANCELLED',
     ]);
   });

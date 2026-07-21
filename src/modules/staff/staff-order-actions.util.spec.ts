@@ -76,31 +76,31 @@ describe('availableActionsForOrder (Web table parity)', () => {
     expect(actions[0]?.label.en).toBe('Accept addition');
   });
 
-  it('delivery pending offers prepare and reject when permitted', () => {
+  it('delivery pending offers accept and reject when permitted (Web parity)', () => {
     const actions = availableActionsForOrder(
       'pending',
       cashierAuth(),
       'delivery',
     );
     expect(actions.map((a) => a.action)).toEqual([
-      'TABLE_CALL_PREPARED',
+      'TABLE_CALL_CONFIRMED',
       'TABLE_CALL_CANCELLED',
     ]);
-    expect(actions[0]?.label).toEqual({
-      en: 'Start preparing',
-      ar: 'بدء التحضير',
-    });
+    expect(actions[0]?.label).toEqual({ en: 'Accept', ar: 'قبول' });
     expect(actions[1]?.label).toEqual({ en: 'Reject', ar: 'رفض' });
   });
 
-  it('delivery confirmed offers prepare only (no reject)', () => {
+  it('delivery confirmed offers mark prepared only (تم التحضير)', () => {
     const actions = availableActionsForOrder(
       'confirmed',
       cashierAuth(),
       'delivery',
     );
     expect(actions.map((a) => a.action)).toEqual(['TABLE_CALL_PREPARED']);
-    expect(actions[0]?.label.en).toBe('Start preparing');
+    expect(actions[0]?.label).toEqual({
+      en: 'Mark prepared',
+      ar: 'تم التحضير',
+    });
   });
 
   it('delivery prepared offers mark sent out for cashier', () => {

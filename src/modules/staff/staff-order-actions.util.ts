@@ -33,11 +33,16 @@ const ACTION_LABELS: Record<
   TABLE_CALL_COMPLETED: { en: 'Finish', ar: 'إنهاء' },
 };
 
-/** Staff-facing delivery action copy (Express actions unchanged). */
+/**
+ * Staff-facing delivery action copy (Express actions unchanged).
+ * Prepare / Accept labels match Web `deliveryOrders.markPrepared` / `accept`.
+ * Deliver keeps Staff courier-handoff wording (not Web "Mark delivered").
+ */
 const DELIVERY_ACTION_LABELS: Partial<
   Record<StaffOrderActionType, { en: string; ar: string }>
 > = {
-  TABLE_CALL_PREPARED: { en: 'Start preparing', ar: 'بدء التحضير' },
+  TABLE_CALL_CONFIRMED: { en: 'Accept', ar: 'قبول' },
+  TABLE_CALL_PREPARED: { en: 'Mark prepared', ar: 'تم التحضير' },
   TABLE_CALL_DELIVERED: {
     en: 'Mark as sent out',
     ar: 'تم التسليم للمندوب',
@@ -98,16 +103,16 @@ export function availableActionsForOrder(
     return specs;
   }
 
+  // Delivery — mirrors Web `OrderActionButtons` variant="delivery".
   if (channel === 'delivery') {
     if (!staffHasPermission(auth, 'delivery:view')) {
       return specs;
     }
     switch (status) {
       case 'pending':
-        if (staffHasPermission(auth, 'orders:prepare')) {
-          push('TABLE_CALL_PREPARED');
+        if (staffHasPermission(auth, 'orders:confirm')) {
+          push('TABLE_CALL_CONFIRMED');
         }
-        // Staff skips Accept; Reject remains available while pending.
         if (staffHasPermission(auth, 'orders:cancel')) {
           push('TABLE_CALL_CANCELLED');
         }
