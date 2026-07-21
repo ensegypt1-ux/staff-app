@@ -249,6 +249,18 @@ export function staffScopeDeniedResult(scope: string): EnsHttpResult {
   };
 }
 
+/** `channel=all` is only valid with `scope=history`. */
+export function staffInvalidChannelScopeResult(): EnsHttpResult {
+  return {
+    status: 400,
+    data: {
+      error: 'channel=all is only supported with scope=history',
+      errorAr: 'channel=all متاح فقط مع scope=history',
+      code: 'INVALID_CHANNEL_SCOPE',
+    },
+  };
+}
+
 export function logUpstreamDenial(
   logger: Logger,
   context: string,

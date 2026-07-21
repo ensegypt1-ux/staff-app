@@ -10,7 +10,6 @@ import {
 } from './staff-order-actions.util';
 import {
   isActiveStaffOrderStatus,
-  isHistoryStaffOrderStatus,
   preferAuthoritativeLifecycleStatus,
   resolveLatestOrderStatus,
   resolveListEntryStatus,
@@ -19,6 +18,7 @@ import {
 import {
   resolveStaffOrderChannel,
   StaffOrderChannel,
+  StaffOrderListChannel,
 } from './staff-order-channel.util';
 import { resolveCanEditItems } from './staff-order-edit-permissions.util';
 import {
@@ -33,8 +33,12 @@ import {
   parseStaffRequestKind,
   StaffRequestKind,
 } from './staff-order-attention.util';
+import {
+  isArchivedVisible,
+  isOperationallyVisible,
+} from './staff-order-terminal-at.util';
 
-export type { StaffOrderChannel };
+export type { StaffOrderChannel, StaffOrderListChannel };
 export type { StaffRequestKind };
 
 export type StaffPresentedOrderItem = {
@@ -98,7 +102,7 @@ export type StaffPresentedListResult = {
   permissions: string[];
   roleName: string | null;
   roleId: number | null;
-  channel: StaffOrderChannel;
+  channel: StaffOrderListChannel;
   scope: 'active' | 'history';
   entries: StaffPresentedOrderEntry[];
   total: number;
@@ -427,14 +431,37 @@ export class StaffOrderPresenterService {
     };
   }
 
+  /**
+   * Age-aware operational vs archive membership.
+   * Uses internal terminalAt resolution — never serialized on entries.
+   */
   filterByScope(
     entries: StaffPresentedOrderEntry[],
     scope: 'active' | 'history',
+    nowMs: number = Date.now(),
   ): StaffPresentedOrderEntry[] {
     if (scope === 'active') {
-      return entries.filter((entry) => isActiveStaffOrderStatus(entry.status));
+      return entries.filter((entry) =>
+        isOperationallyVisible(
+          {
+            status: entry.status,
+            actionDetails: entry.actionDetails,
+            createdAt: entry.createdAt,
+          },
+          nowMs,
+        ),
+      );
     }
-    return entries.filter((entry) => isHistoryStaffOrderStatus(entry.status));
+    return entries.filter((entry) =>
+      isArchivedVisible(
+        {
+          status: entry.status,
+          actionDetails: entry.actionDetails,
+          createdAt: entry.createdAt,
+        },
+        nowMs,
+      ),
+    );
   }
 
   applyListScope(

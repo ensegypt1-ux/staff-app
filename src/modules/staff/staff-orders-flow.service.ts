@@ -12,6 +12,7 @@ import {
   normalizeStaffUpstreamError,
   rejectUpstreamListResult,
   staffHistoryDeniedResult,
+  staffInvalidChannelScopeResult,
   staffScopeDeniedResult,
 } from './staff-order-errors.util';
 import {
@@ -23,12 +24,16 @@ import {
 import { resolveStaffMenuId } from './staff-menu-scope.util';
 import {
   StaffOrderChannel,
+  StaffOrderListChannel,
   StaffOrderPresenterService,
   StaffPresentedDetailResult,
   StaffPresentedListResult,
   StaffPresentedOrderEntry,
 } from './staff-order-presenter.service';
-import { isDeliveryUpstreamRow } from './staff-order-channel.util';
+import {
+  isDeliveryUpstreamRow,
+  parseStaffOrderListChannel,
+} from './staff-order-channel.util';
 import {
   countAttentionEntries,
   countTableAttentionAcrossSources,
@@ -66,8 +71,14 @@ import {
 } from './staff-table-order.util';
 import { StaffTableOrderCreatorRegistry } from './staff-table-order-creator.registry';
 import { getAuthIdentity } from '../../common/utils/jwt-payload.util';
+import { terminalAtSortMs } from './staff-order-terminal-at.util';
 
 type Scope = 'active' | 'history';
+
+/** Max upstream pages to scan when age-filtering post-fetch. */
+const ARCHIVE_SCOPE_MAX_SCAN_PAGES = 15;
+/** Pages of delivered/cancelled to scan for operational grace (page 1). */
+const OPERATIONAL_GRACE_SCAN_PAGES = 3;
 
 type StaffAuthRequestCache = {
   auth: StaffResolvedAuth;
@@ -203,7 +214,7 @@ export class StaffOrdersFlowService {
     query: Record<string, unknown>,
   ): Promise<EnsHttpResult> {
     const auth = await this.resolveStaffAuth(req);
-    const channel = this.parseChannel(query.channel);
+    const listChannel = parseStaffOrderListChannel(query.channel);
     const page = Math.max(1, Number(query.page ?? 1) || 1);
     const limit = Math.min(100, Math.max(1, Number(query.limit ?? 50) || 50));
 
@@ -212,6 +223,18 @@ export class StaffOrdersFlowService {
     }
 
     const scope = this.parseScope(query.scope);
+
+    if (listChannel === 'all') {
+      if (scope !== 'history') {
+        return staffInvalidChannelScopeResult();
+      }
+      if (!canStaffViewHistory(auth)) {
+        return staffHistoryDeniedResult();
+      }
+      return this.listUnifiedArchiveOrders(req, auth, page, limit, query);
+    }
+
+    const channel = listChannel;
 
     if (scope === 'history' && !canStaffViewHistory(auth)) {
       return staffHistoryDeniedResult();
@@ -1316,19 +1339,7 @@ export class StaffOrdersFlowService {
       presented,
     );
 
-    // Web uses status/date/search on one list (status=all by default).
-    // Only apply legacy scope=history narrowing when no explicit status filter.
-    const hasStatusFilter =
-      query.status !== undefined &&
-      query.status !== null &&
-      String(query.status).trim() !== '' &&
-      String(query.status).trim().toLowerCase() !== 'all';
-
-    let entries = presented;
-    if (!hasStatusFilter && scope === 'history') {
-      entries = this.presenter.filterByScope(presented, 'history');
-    }
-
+    let entries = this.presenter.filterByScope(presented, scope);
     entries = await this.enrichEntriesForStaff(req, menuId, auth, entries);
 
     let mergedServiceCount = 0;
@@ -1349,14 +1360,34 @@ export class StaffOrdersFlowService {
       mergedServiceCount = merged.addedCount;
     }
 
+    if (scope === 'active' && page === 1) {
+      const grace = await this.fetchOperationalGraceEntries(
+        req,
+        menuId,
+        auth,
+        channel,
+        query,
+      );
+      const before = entries.length;
+      entries = this.mergeGraceIntoOperationalPage(entries, grace, limit);
+      mergedServiceCount += Math.max(0, entries.length - before);
+    }
+
+    entries = this.presenter.applyListScopeToEntries(entries, scope);
     entries = sortTableEntriesByAttention(entries);
 
-    const upstreamTotal =
-      Number(payload.total ?? entries.length) || entries.length;
-    const total = upstreamTotal + mergedServiceCount;
-    const totalPages =
-      Number(payload.totalPages ?? Math.ceil(total / limit)) ||
-      Math.max(1, Math.ceil(total / limit));
+    const scopedTotal = await this.estimateScopedActivityLogTotal({
+      req,
+      menuId,
+      auth,
+      channel,
+      scope,
+      query,
+      seedPresented: presented,
+      seedPayload: payload,
+    });
+    const total = scopedTotal + mergedServiceCount;
+    const totalPages = Math.max(1, Math.ceil(total / limit) || 1);
 
     return {
       status: 200,
@@ -1717,20 +1748,42 @@ export class StaffOrdersFlowService {
       'delivery',
     );
 
-    const scoped = this.presenter.applyListScopeToEntries(
-      this.presenter.filterByScope(presented, scope),
-      scope,
-    );
-    const enriched = await this.enrichEntriesForStaff(
+    const collectedSeed = this.presenter.filterByScope(presented, scope);
+    let entries = await this.enrichEntriesForStaff(
       req,
       menuId,
       auth,
-      scoped,
+      collectedSeed,
     );
-    const total = Number(payload.total ?? enriched.length) || enriched.length;
-    const totalPages =
-      Number(payload.totalPages ?? Math.ceil(total / limit)) ||
-      Math.max(1, Math.ceil(total / limit));
+
+    let graceExtra = 0;
+    if (scope === 'active' && page === 1) {
+      const grace = await this.fetchOperationalGraceEntries(
+        req,
+        menuId,
+        auth,
+        channel,
+        query,
+      );
+      const before = entries.length;
+      entries = this.mergeGraceIntoOperationalPage(entries, grace, limit);
+      graceExtra = Math.max(0, entries.length - before);
+    }
+
+    entries = this.presenter.applyListScopeToEntries(entries, scope);
+
+    const scopedTotal = await this.estimateScopedActivityLogTotal({
+      req,
+      menuId,
+      auth,
+      channel,
+      scope,
+      query,
+      seedPresented: presented,
+      seedPayload: payload,
+    });
+    const total = scopedTotal + graceExtra;
+    const totalPages = Math.max(1, Math.ceil(total / limit) || 1);
 
     const pendingCount = await this.resolveDeliveryPendingCount(req, menuId);
 
@@ -1743,7 +1796,7 @@ export class StaffOrdersFlowService {
         roleId: auth.roleId,
         channel,
         scope,
-        entries: enriched,
+        entries,
         total,
         page,
         limit,
@@ -2428,9 +2481,8 @@ export class StaffOrdersFlowService {
   }
 
   private parseChannel(raw: unknown): StaffOrderChannel {
-    return String(raw ?? 'table').trim().toLowerCase() === 'delivery'
-      ? 'delivery'
-      : 'table';
+    const parsed = parseStaffOrderListChannel(raw);
+    return parsed === 'all' ? 'table' : parsed;
   }
 
   private parseScope(raw: unknown): Scope {
@@ -2445,7 +2497,7 @@ export class StaffOrdersFlowService {
 
   private emptyList(
     auth: StaffResolvedAuth,
-    channel: StaffOrderChannel,
+    channel: StaffOrderListChannel,
     scope: Scope,
     page: number,
     limit: number,
@@ -2465,5 +2517,318 @@ export class StaffOrdersFlowService {
       pendingCount: 0,
       capabilities: this.presenter.capabilitiesFor(auth),
     };
+  }
+
+  private dedupeEntriesByStaffCallId(
+    entries: StaffPresentedOrderEntry[],
+  ): StaffPresentedOrderEntry[] {
+    const seen = new Set<number>();
+    const out: StaffPresentedOrderEntry[] = [];
+    for (const entry of entries) {
+      if (entry.staffCallId <= 0 || seen.has(entry.staffCallId)) continue;
+      seen.add(entry.staffCallId);
+      out.push(entry);
+    }
+    return out;
+  }
+
+  private mergeGraceIntoOperationalPage(
+    pageEntries: StaffPresentedOrderEntry[],
+    grace: StaffPresentedOrderEntry[],
+    limit: number,
+  ): StaffPresentedOrderEntry[] {
+    const merged = this.dedupeEntriesByStaffCallId([
+      ...grace,
+      ...pageEntries,
+    ]);
+    return merged.slice(0, Math.max(limit, pageEntries.length));
+  }
+
+  private async fetchOperationalGraceEntries(
+    req: Request,
+    menuId: number,
+    auth: StaffResolvedAuth,
+    channel: StaffOrderChannel,
+    query: Record<string, unknown>,
+  ): Promise<StaffPresentedOrderEntry[]> {
+    const statuses = ['delivered', 'cancelled'] as const;
+    const collected: StaffPresentedOrderEntry[] = [];
+
+    for (const status of statuses) {
+      for (let page = 1; page <= OPERATIONAL_GRACE_SCAN_PAGES; page += 1) {
+        const upstream = await this.ensHttp.proxy({
+          method: 'GET',
+          path: `menus/${menuId}/activity-logs`,
+          req,
+          query: {
+            page,
+            limit: 50,
+            channel,
+            status,
+            ...this.deliveryListQueryParams(query, { skipDates: false }),
+          },
+        });
+        if (upstream.status >= 400) break;
+        const payload = (upstream.data ?? {}) as Record<string, unknown>;
+        const rows = Array.isArray(payload.entries)
+          ? payload.entries
+          : Array.isArray(payload.calls)
+            ? payload.calls
+            : [];
+        if (rows.length === 0) break;
+
+        let presented = rows
+          .map((row) =>
+            this.presenter.presentListRow(
+              row as Record<string, unknown>,
+              auth,
+              channel,
+            ),
+          )
+          .filter((entry): entry is StaffPresentedOrderEntry => entry != null);
+
+        presented = await this.hydrateListEntries(
+          req,
+          menuId,
+          auth,
+          channel,
+          presented,
+        );
+        presented = await this.enrichEntriesActionDetailsFromActivityLogs(
+          req,
+          menuId,
+          presented,
+          channel === 'delivery' ? 'delivery' : undefined,
+        );
+        collected.push(
+          ...this.presenter.filterByScope(presented, 'active'),
+        );
+
+        const totalPages = Number(payload.totalPages ?? 1) || 1;
+        if (page >= totalPages) break;
+      }
+    }
+
+    return this.presenter.applyListScopeToEntries(
+      this.dedupeEntriesByStaffCallId(collected),
+      'active',
+    );
+  }
+
+  private async estimateScopedActivityLogTotal(input: {
+    req: Request;
+    menuId: number;
+    auth: StaffResolvedAuth;
+    channel: StaffOrderChannel;
+    scope: Scope;
+    query: Record<string, unknown>;
+    seedPresented: StaffPresentedOrderEntry[];
+    seedPayload: Record<string, unknown>;
+  }): Promise<number> {
+    const matched = [
+      ...this.presenter.filterByScope(input.seedPresented, input.scope),
+    ];
+    const seedTotalPages =
+      Number(input.seedPayload.totalPages ?? 1) || 1;
+    const limit = Math.min(
+      100,
+      Math.max(1, Number(input.query.limit ?? 50) || 50),
+    );
+
+    for (
+      let page = 2;
+      page <= Math.min(seedTotalPages, ARCHIVE_SCOPE_MAX_SCAN_PAGES);
+      page += 1
+    ) {
+      const upstream = await this.ensHttp.proxy({
+        method: 'GET',
+        path: `menus/${input.menuId}/activity-logs`,
+        req: input.req,
+        query: {
+          page,
+          limit,
+          channel: input.channel,
+          ...this.deliveryListQueryParams(input.query),
+        },
+      });
+      if (upstream.status >= 400) break;
+      const payload = (upstream.data ?? {}) as Record<string, unknown>;
+      const rows = Array.isArray(payload.entries)
+        ? payload.entries
+        : Array.isArray(payload.calls)
+          ? payload.calls
+          : [];
+      if (rows.length === 0) break;
+
+      let presented = rows
+        .map((row) =>
+          this.presenter.presentListRow(
+            row as Record<string, unknown>,
+            input.auth,
+            input.channel,
+          ),
+        )
+        .filter((entry): entry is StaffPresentedOrderEntry => entry != null);
+      presented = await this.enrichEntriesActionDetailsFromActivityLogs(
+        input.req,
+        input.menuId,
+        presented,
+        input.channel === 'delivery' ? 'delivery' : undefined,
+      );
+      matched.push(...this.presenter.filterByScope(presented, input.scope));
+    }
+
+    return this.dedupeEntriesByStaffCallId(matched).length;
+  }
+
+  private async listUnifiedArchiveOrders(
+    req: Request,
+    auth: StaffResolvedAuth,
+    page: number,
+    limit: number,
+    query: Record<string, unknown>,
+  ): Promise<EnsHttpResult> {
+    const menuId = this.resolveMenuId(req, query);
+    if (menuId <= 0) {
+      return {
+        status: 404,
+        data: {
+          error: 'Menu not found',
+          errorAr: 'القائمة غير موجودة',
+          code: 'MENU_NOT_FOUND',
+        },
+      };
+    }
+
+    const channels: StaffOrderChannel[] = [];
+    if (canStaffViewOrders(auth)) channels.push('table');
+    if (canStaffViewDelivery(auth)) channels.push('delivery');
+
+    if (channels.length === 0) {
+      return {
+        status: 200,
+        data: this.emptyList(auth, 'all', 'history', page, limit),
+      };
+    }
+
+    const collected: StaffPresentedOrderEntry[] = [];
+    for (const channel of channels) {
+      const channelEntries = await this.scanArchiveEntriesForChannel(
+        req,
+        menuId,
+        auth,
+        channel,
+        query,
+      );
+      collected.push(...channelEntries);
+    }
+
+    const deduped = this.dedupeEntriesByStaffCallId(collected);
+    deduped.sort((a, b) => {
+      const tb = terminalAtSortMs({
+        status: b.status,
+        actionDetails: b.actionDetails,
+        createdAt: b.createdAt,
+      });
+      const ta = terminalAtSortMs({
+        status: a.status,
+        actionDetails: a.actionDetails,
+        createdAt: a.createdAt,
+      });
+      if (tb !== ta) return tb - ta;
+      return b.staffCallId - a.staffCallId;
+    });
+
+    const total = deduped.length;
+    const slice = deduped.slice((page - 1) * limit, page * limit);
+    const entries = this.presenter.applyListScopeToEntries(slice, 'history');
+    const enriched = await this.enrichEntriesForStaff(
+      req,
+      menuId,
+      auth,
+      entries,
+    );
+
+    return {
+      status: 200,
+      data: {
+        staffJobRole: auth.staffJobRole,
+        permissions: auth.permissions,
+        roleName: auth.roleName,
+        roleId: auth.roleId,
+        channel: 'all',
+        scope: 'history',
+        entries: enriched,
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit) || 1),
+        pendingCount: 0,
+        capabilities: this.presenter.capabilitiesFor(auth),
+      },
+    };
+  }
+
+  private async scanArchiveEntriesForChannel(
+    req: Request,
+    menuId: number,
+    auth: StaffResolvedAuth,
+    channel: StaffOrderChannel,
+    query: Record<string, unknown>,
+  ): Promise<StaffPresentedOrderEntry[]> {
+    const matched: StaffPresentedOrderEntry[] = [];
+    const scanLimit = 50;
+
+    for (let page = 1; page <= ARCHIVE_SCOPE_MAX_SCAN_PAGES; page += 1) {
+      const upstream = await this.ensHttp.proxy({
+        method: 'GET',
+        path: `menus/${menuId}/activity-logs`,
+        req,
+        query: {
+          page,
+          limit: scanLimit,
+          channel,
+          ...this.deliveryListQueryParams(query),
+        },
+      });
+      if (upstream.status >= 400) break;
+      const payload = (upstream.data ?? {}) as Record<string, unknown>;
+      const rows = Array.isArray(payload.entries)
+        ? payload.entries
+        : Array.isArray(payload.calls)
+          ? payload.calls
+          : [];
+      if (rows.length === 0) break;
+
+      let presented = rows
+        .map((row) =>
+          this.presenter.presentListRow(
+            row as Record<string, unknown>,
+            auth,
+            channel,
+          ),
+        )
+        .filter((entry): entry is StaffPresentedOrderEntry => entry != null);
+
+      presented = await this.hydrateListEntries(
+        req,
+        menuId,
+        auth,
+        channel,
+        presented,
+      );
+      presented = await this.enrichEntriesActionDetailsFromActivityLogs(
+        req,
+        menuId,
+        presented,
+        channel === 'delivery' ? 'delivery' : undefined,
+      );
+      matched.push(...this.presenter.filterByScope(presented, 'history'));
+
+      const totalPages = Number(payload.totalPages ?? 1) || 1;
+      if (page >= totalPages) break;
+    }
+
+    return matched;
   }
 }

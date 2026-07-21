@@ -336,14 +336,27 @@ describe('StaffOrderPresenterService', () => {
     expect(entry!.channel).toBe('delivery');
   });
 
-  it('filterByScope history keeps only delivered and cancelled', () => {
+  it('filterByScope history keeps archived delivered and cancelled', () => {
+    const old = '2020-01-01T00:00:00.000Z';
     const entries = [
       presenter.presentTableCallRow(
-        { id: 1, status: 'delivered', tableNumber: '1', items: [] },
+        {
+          id: 1,
+          status: 'delivered',
+          tableNumber: '1',
+          items: [],
+          createdAt: old,
+        },
         waiterAuth(),
       )!,
       presenter.presentTableCallRow(
-        { id: 2, status: 'cancelled', tableNumber: '2', items: [] },
+        {
+          id: 2,
+          status: 'cancelled',
+          tableNumber: '2',
+          items: [],
+          createdAt: old,
+        },
         waiterAuth(),
       )!,
       presenter.presentTableCallRow(
@@ -353,6 +366,47 @@ describe('StaffOrderPresenterService', () => {
     ];
     const history = presenter.filterByScope(entries, 'history');
     expect(history.map((e) => e.status)).toEqual(['delivered', 'cancelled']);
+  });
+
+  it('filterByScope active keeps recent terminals within grace', () => {
+    const recent = new Date().toISOString();
+    const entries = [
+      presenter.presentTableCallRow(
+        {
+          id: 1,
+          status: 'delivered',
+          tableNumber: '1',
+          items: [],
+          createdAt: recent,
+          actionDetails: [
+            { action: 'TABLE_CALL_DELIVERED', time: recent },
+          ],
+        },
+        waiterAuth(),
+      )!,
+      presenter.presentTableCallRow(
+        {
+          id: 2,
+          status: 'delivered',
+          tableNumber: '2',
+          items: [],
+          createdAt: '2020-01-01T00:00:00.000Z',
+          actionDetails: [
+            {
+              action: 'TABLE_CALL_DELIVERED',
+              time: '2020-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+        waiterAuth(),
+      )!,
+      presenter.presentTableCallRow(
+        { id: 3, status: 'pending', tableNumber: '3', items: [] },
+        waiterAuth(),
+      )!,
+    ];
+    const active = presenter.filterByScope(entries, 'active');
+    expect(active.map((e) => e.staffCallId).sort()).toEqual([1, 3]);
   });
 
   it('applyListScope clears actions and edit for history', () => {

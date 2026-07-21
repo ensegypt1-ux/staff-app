@@ -1,5 +1,17 @@
 export type StaffOrderChannel = 'table' | 'delivery';
 
+/** List query channel — `all` is only valid with scope=history. */
+export type StaffOrderListChannel = StaffOrderChannel | 'all';
+
+export function parseStaffOrderListChannel(
+  raw: unknown,
+): StaffOrderListChannel {
+  const value = String(raw ?? 'table').trim().toLowerCase();
+  if (value === 'delivery') return 'delivery';
+  if (value === 'all') return 'all';
+  return 'table';
+}
+
 /**
  * Detect table vs delivery from upstream payloads (activity-logs, table-calls).
  * Express table-calls API may omit `type`; delivery orders use empty `tableNumber`.
