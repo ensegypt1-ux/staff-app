@@ -68,7 +68,11 @@ export type StaffPresentedOrderEntry = {
   /** Express activity-log charge fields (delivery + table). */
   itemsSubtotal: number | null;
   taxAmount: number | null;
+  taxPercent: number | null;
+  taxEnabled: boolean | null;
   serviceAmount: number | null;
+  servicePercent: number | null;
+  serviceEnabled: boolean | null;
   deliveryFee: number | null;
   items: StaffPresentedOrderItem[];
   itemCount: number;
@@ -249,7 +253,11 @@ export class StaffOrderPresenterService {
       ),
       itemsSubtotal: base.itemsSubtotal ?? overlay.itemsSubtotal,
       taxAmount: base.taxAmount ?? overlay.taxAmount,
+      taxPercent: base.taxPercent ?? overlay.taxPercent,
+      taxEnabled: base.taxEnabled ?? overlay.taxEnabled,
       serviceAmount: base.serviceAmount ?? overlay.serviceAmount,
+      servicePercent: base.servicePercent ?? overlay.servicePercent,
+      serviceEnabled: base.serviceEnabled ?? overlay.serviceEnabled,
       deliveryFee: base.deliveryFee ?? overlay.deliveryFee,
       items,
       itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
@@ -399,7 +407,11 @@ export class StaffOrderPresenterService {
       governorateNameEn: this.stringOrNull(input.raw.governorateNameEn),
       itemsSubtotal: this.numberOrNull(input.raw.itemsSubtotal),
       taxAmount: this.numberOrNull(input.raw.taxAmount),
+      taxPercent: this.numberOrNull(input.raw.taxPercent),
+      taxEnabled: this.booleanOrNull(input.raw.taxEnabled),
       serviceAmount: this.numberOrNull(input.raw.serviceAmount),
+      servicePercent: this.numberOrNull(input.raw.servicePercent),
+      serviceEnabled: this.booleanOrNull(input.raw.serviceEnabled),
       deliveryFee: this.numberOrNull(input.raw.deliveryFee),
       items: isService ? [] : input.items,
       itemCount: isService ? 0 : itemCount,
@@ -595,5 +607,13 @@ export class StaffOrderPresenterService {
   private numberOrNull(value: unknown): number | null {
     const num = Number(value);
     return Number.isFinite(num) ? num : null;
+  }
+
+  /** Preserve Express booleans; omit when absent (backward compatible). */
+  private booleanOrNull(value: unknown): boolean | null {
+    if (value === true || value === false) return value;
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return null;
   }
 }

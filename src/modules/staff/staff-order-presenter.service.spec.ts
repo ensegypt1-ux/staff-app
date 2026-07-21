@@ -447,7 +447,11 @@ describe('StaffOrderPresenterService', () => {
         orderNotes: 'Ring twice',
         itemsSubtotal: 10,
         taxAmount: 1,
+        taxPercent: 10,
+        taxEnabled: true,
         serviceAmount: 0.5,
+        servicePercent: 5,
+        serviceEnabled: true,
         deliveryFee: 2,
         totalPrice: 13.5,
         items: [{ name: 'Burger', quantity: 1, price: 10, notes: 'No onion' }],
@@ -458,7 +462,11 @@ describe('StaffOrderPresenterService', () => {
     expect(entry!.orderNotes).toBe('Ring twice');
     expect(entry!.itemsSubtotal).toBe(10);
     expect(entry!.taxAmount).toBe(1);
+    expect(entry!.taxPercent).toBe(10);
+    expect(entry!.taxEnabled).toBe(true);
     expect(entry!.serviceAmount).toBe(0.5);
+    expect(entry!.servicePercent).toBe(5);
+    expect(entry!.serviceEnabled).toBe(true);
     expect(entry!.deliveryFee).toBe(2);
     expect(entry!.totalPrice).toBe(13.5);
     expect(entry!.items[0]?.notes).toBe('No onion');
@@ -466,5 +474,54 @@ describe('StaffOrderPresenterService', () => {
       'TABLE_CALL_PREPARED',
       'TABLE_CALL_CANCELLED',
     ]);
+  });
+
+  it('exposes tax/service percents on table list rows without inventing values', () => {
+    const entry = presenter.presentListRow(
+      {
+        id: 201,
+        orderId: 56,
+        type: 'table',
+        status: 'pending',
+        customerName: 'Ali',
+        itemsSubtotal: 500,
+        taxAmount: 50,
+        taxPercent: 10,
+        taxEnabled: true,
+        serviceAmount: 70,
+        servicePercent: 14,
+        serviceEnabled: true,
+        totalPrice: 620,
+        items: [],
+      },
+      cashierAuth(),
+      'table',
+    );
+    expect(entry!.customerName).toBe('Ali');
+    expect(entry!.taxPercent).toBe(10);
+    expect(entry!.servicePercent).toBe(14);
+    expect(entry!.taxEnabled).toBe(true);
+    expect(entry!.serviceEnabled).toBe(true);
+  });
+
+  it('leaves tax/service percent null when Express omits them', () => {
+    const entry = presenter.presentListRow(
+      {
+        id: 202,
+        orderId: 57,
+        type: 'table',
+        status: 'pending',
+        itemsSubtotal: 100,
+        taxAmount: 10,
+        totalPrice: 110,
+        items: [],
+      },
+      cashierAuth(),
+      'table',
+    );
+    expect(entry!.taxPercent).toBeNull();
+    expect(entry!.servicePercent).toBeNull();
+    expect(entry!.taxEnabled).toBeNull();
+    expect(entry!.serviceEnabled).toBeNull();
   });
 });
