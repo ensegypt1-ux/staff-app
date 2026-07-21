@@ -9,20 +9,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StaffModule = void 0;
 const common_1 = require("@nestjs/common");
 const staff_controller_1 = require("./staff.controller");
-const staff_order_presenter_service_1 = require("./staff-order-presenter.service");
-const staff_orders_flow_service_1 = require("./staff-orders-flow.service");
-const staff_table_order_creator_registry_1 = require("./staff-table-order-creator.registry");
+const staff_core_module_1 = require("./staff-core.module");
 let StaffModule = class StaffModule {
 };
 exports.StaffModule = StaffModule;
 exports.StaffModule = StaffModule = __decorate([
     (0, common_1.Module)({
+        imports: [staff_core_module_1.StaffCoreModule],
         controllers: [staff_controller_1.StaffController],
-        providers: [
-            staff_order_presenter_service_1.StaffOrderPresenterService,
-            staff_orders_flow_service_1.StaffOrdersFlowService,
-            staff_table_order_creator_registry_1.StaffTableOrderCreatorRegistry,
-        ],
     })
 ], StaffModule);
 //# sourceMappingURL=staff.module.js.map

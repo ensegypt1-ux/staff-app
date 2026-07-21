@@ -1,3 +1,4 @@
+export type ProcessRole = 'api' | 'worker' | 'all';
 declare const _default: () => {
     port: number;
     nodeEnv: string;
@@ -14,5 +15,19 @@ declare const _default: () => {
     trustProxyHops: number;
     throttleTtlMs: number;
     throttleLimit: number;
+    processRole: ProcessRole;
+    isApiRole: boolean;
+    isWorkerRole: boolean;
+    databaseUrl: string | undefined;
+    ensSocketUrl: string;
+    fcmEnabled: boolean;
+    fcmDryRun: boolean;
+    fcmReconcileIntervalMs: number;
+    fcmUncoveredReadyMs: number;
+    fcmPerMenuRateLimit: number;
+    firebaseProjectId: string | undefined;
+    firebaseClientEmail: string | undefined;
+    firebasePrivateKey: string | undefined;
+    firebaseServiceAccountJson: string | undefined;
 };
 export default _default;

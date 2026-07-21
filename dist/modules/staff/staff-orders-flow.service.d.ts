@@ -24,6 +24,11 @@ export declare class StaffOrdersFlowService {
         data: StaffPresentedDetailResult;
     }>;
     postOrderAction(req: Request, staffCallId: number, action: string, menuId: number, activityLogId?: number): Promise<EnsHttpResult>;
+    private presentSuccessfulTableFinish;
+    private resolveTableFinishAfterConflict;
+    private presentDeliveredFinishWithFallback;
+    private presentDeliveredFinishSuccess;
+    private minimalDeliveredFinishSuccess;
     private autoConfirmPendingDeliveryOrder;
     getCapabilities(req: Request): Promise<{
         permissions: string[];

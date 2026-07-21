@@ -86,6 +86,48 @@ export class EnvironmentVariables {
   @IsOptional()
   @IsString()
   REQUEST_URLENCODED_LIMIT?: string;
+
+  @IsOptional()
+  @IsString()
+  PROCESS_ROLE?: string;
+
+  @IsOptional()
+  @IsString()
+  DATABASE_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  ENS_SOCKET_URL?: string;
+
+  @IsOptional()
+  @IsString()
+  FCM_ENABLED?: string;
+
+  @IsOptional()
+  @IsString()
+  FCM_DRY_RUN?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_PROJECT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_CLIENT_EMAIL?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_PRIVATE_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  FIREBASE_SERVICE_ACCOUNT_JSON?: string;
+}
+
+function isTruthy(raw: string | undefined): boolean {
+  if (raw == null || raw === '') return false;
+  const v = raw.trim().toLowerCase();
+  return v === 'true' || v === '1' || v === 'yes';
 }
 
 export function validateEnv(config: Record<string, unknown>) {
@@ -104,6 +146,24 @@ export function validateEnv(config: Record<string, unknown>) {
 
   const nodeEnv = validated.NODE_ENV;
   const productionIssues: string[] = [];
+  const role = (validated.PROCESS_ROLE ?? 'api').trim().toLowerCase();
+  if (role !== 'api' && role !== 'worker' && role !== 'all') {
+    productionIssues.push(
+      'PROCESS_ROLE must be one of: api, worker, all',
+    );
+  }
+
+  const fcmEnabled = isTruthy(validated.FCM_ENABLED);
+  const needsDb =
+    fcmEnabled || role === 'worker' || role === 'all' || !!validated.DATABASE_URL;
+
+  if (fcmEnabled || role === 'worker' || role === 'all') {
+    if (!(validated.DATABASE_URL?.trim())) {
+      productionIssues.push(
+        'DATABASE_URL is required when FCM_ENABLED=true or PROCESS_ROLE is worker|all',
+      );
+    }
+  }
 
   if (nodeEnv === 'production') {
     const jwt = validated.JWT_ACCESS_SECRET?.trim() ?? '';
@@ -118,7 +178,16 @@ export function validateEnv(config: Record<string, unknown>) {
         'CORS_ORIGINS=* is forbidden in production; set an explicit allowlist',
       );
     }
+
+    if (role === 'all') {
+      productionIssues.push(
+        'PROCESS_ROLE=all is not allowed in production; use api and worker separately',
+      );
+    }
   }
+
+  // Silence unused when only validating presence path
+  void needsDb;
 
   if (productionIssues.length > 0) {
     throw new Error(

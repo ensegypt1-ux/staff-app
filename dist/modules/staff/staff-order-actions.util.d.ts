@@ -19,7 +19,7 @@ export declare function canStaffProcessOrders(auth: AuthCaps): boolean;
 export declare function canStaffViewDelivery(auth: AuthCaps): boolean;
 export declare function canStaffViewOrders(auth: AuthCaps): boolean;
 export declare function canStaffViewHistory(auth: AuthCaps): boolean;
-export declare function statusLabelFor(status: StaffOrderStatus): {
+export declare function statusLabelFor(status: StaffOrderStatus, channel?: StaffOrderChannel): {
     en: string;
     ar: string;
 };

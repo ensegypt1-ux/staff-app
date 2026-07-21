@@ -114,6 +114,57 @@ __decorate([
     (0, class_validator_1.IsString)(),
     __metadata("design:type", String)
 ], EnvironmentVariables.prototype, "REQUEST_URLENCODED_LIMIT", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "PROCESS_ROLE", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "DATABASE_URL", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "ENS_SOCKET_URL", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "FCM_ENABLED", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "FCM_DRY_RUN", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "FIREBASE_PROJECT_ID", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "FIREBASE_CLIENT_EMAIL", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "FIREBASE_PRIVATE_KEY", void 0);
+__decorate([
+    (0, class_validator_1.IsOptional)(),
+    (0, class_validator_1.IsString)(),
+    __metadata("design:type", String)
+], EnvironmentVariables.prototype, "FIREBASE_SERVICE_ACCOUNT_JSON", void 0);
+function isTruthy(raw) {
+    if (raw == null || raw === '')
+        return false;
+    const v = raw.trim().toLowerCase();
+    return v === 'true' || v === '1' || v === 'yes';
+}
 function validateEnv(config) {
     const validated = (0, class_transformer_1.plainToInstance)(EnvironmentVariables, config, {
         enableImplicitConversion: true,
@@ -126,6 +177,17 @@ function validateEnv(config) {
     }
     const nodeEnv = validated.NODE_ENV;
     const productionIssues = [];
+    const role = (validated.PROCESS_ROLE ?? 'api').trim().toLowerCase();
+    if (role !== 'api' && role !== 'worker' && role !== 'all') {
+        productionIssues.push('PROCESS_ROLE must be one of: api, worker, all');
+    }
+    const fcmEnabled = isTruthy(validated.FCM_ENABLED);
+    const needsDb = fcmEnabled || role === 'worker' || role === 'all' || !!validated.DATABASE_URL;
+    if (fcmEnabled || role === 'worker' || role === 'all') {
+        if (!(validated.DATABASE_URL?.trim())) {
+            productionIssues.push('DATABASE_URL is required when FCM_ENABLED=true or PROCESS_ROLE is worker|all');
+        }
+    }
     if (nodeEnv === 'production') {
         const jwt = validated.JWT_ACCESS_SECRET?.trim() ?? '';
         if (jwt.length < 32) {
@@ -134,7 +196,11 @@ function validateEnv(config) {
         if ((validated.CORS_ORIGINS ?? '').trim() === '*') {
             productionIssues.push('CORS_ORIGINS=* is forbidden in production; set an explicit allowlist');
         }
+        if (role === 'all') {
+            productionIssues.push('PROCESS_ROLE=all is not allowed in production; use api and worker separately');
+        }
     }
+    void needsDb;
     if (productionIssues.length > 0) {
         throw new Error(`Environment validation failed:\n${productionIssues.join('\n')}`);
     }

@@ -1,0 +1,24 @@
+﻿# Local Postgres for Staff BFF FCM (devices + delivery logs).
+# Usage: docker compose up -d
+# Then: npx prisma migrate deploy
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: staff-bff-postgres
+    restart: unless-stopped
+    ports:
+      - "55433:5432"
+    environment:
+      POSTGRES_USER: staff_bff
+      POSTGRES_PASSWORD: staff_bff_dev
+      POSTGRES_DB: staff_bff
+    volumes:
+      - staff_bff_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U staff_bff -d staff_bff"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  staff_bff_pgdata:

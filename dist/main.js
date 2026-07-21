@@ -5,7 +5,7 @@ const config_1 = require("@nestjs/config");
 const core_1 = require("@nestjs/core");
 const express_1 = require("express");
 const helmet_1 = require("helmet");
-const app_module_1 = require("./app.module");
+const process_role_1 = require("./config/process-role");
 function parseCorsOrigins(value, nodeEnv) {
     const trimmed = value.trim();
     if (trimmed === '*') {
@@ -20,8 +20,10 @@ function parseCorsOrigins(value, nodeEnv) {
         .filter(Boolean);
 }
 async function bootstrap() {
+    (0, process_role_1.applyProcessRoleFromArgv)();
+    const { AppModule } = require('./app.module');
     const nodeEnv = process.env.NODE_ENV ?? 'development';
-    const app = await core_1.NestFactory.create(app_module_1.AppModule, {
+    const app = await core_1.NestFactory.create(AppModule, {
         bodyParser: false,
         logger: nodeEnv === 'production'
             ? ['error', 'warn', 'log']
@@ -34,6 +36,8 @@ async function bootstrap() {
     const urlencodedLimit = configService.get('requestUrlencodedLimit') ?? '1mb';
     const trustProxyHops = configService.get('trustProxyHops') ?? 0;
     const upstreamDebug = configService.get('upstreamDebugLog');
+    const processRole = configService.get('processRole') ?? 'api';
+    app.enableShutdownHooks();
     if (trustProxyHops > 0) {
         const httpAdapter = app.getHttpAdapter();
         const instance = httpAdapter.getInstance();
@@ -65,7 +69,7 @@ async function bootstrap() {
         forbidUnknownValues: false,
     }));
     await app.listen(port);
-    common_1.Logger.log(`Ensmenu Staff BFF listening on port ${port}`, 'Bootstrap');
+    common_1.Logger.log(`Ensmenu Staff BFF listening on port ${port} (role=${processRole})`, 'Bootstrap');
     if (upstreamDebug) {
         common_1.Logger.log('Upstream debug logging enabled (UPSTREAM_DEBUG_LOG)', 'Bootstrap');
     }

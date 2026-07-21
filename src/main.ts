@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { json, urlencoded } from 'express';
 import helmet from 'helmet';
-import { AppModule } from './app.module';
+import { applyProcessRoleFromArgv } from './config/process-role';
 
 function parseCorsOrigins(
   value: string,
@@ -26,6 +26,11 @@ function parseCorsOrigins(
 }
 
 async function bootstrap() {
+  // Must run before AppModule is loaded (imports are hoisted otherwise).
+  applyProcessRoleFromArgv();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { AppModule } = require('./app.module') as typeof import('./app.module');
+
   const nodeEnv = process.env.NODE_ENV ?? 'development';
   const app = await NestFactory.create(AppModule, {
     bodyParser: false,
@@ -43,6 +48,9 @@ async function bootstrap() {
     configService.get<string>('requestUrlencodedLimit') ?? '1mb';
   const trustProxyHops = configService.get<number>('trustProxyHops') ?? 0;
   const upstreamDebug = configService.get<boolean>('upstreamDebugLog');
+  const processRole = configService.get<string>('processRole') ?? 'api';
+
+  app.enableShutdownHooks();
 
   if (trustProxyHops > 0) {
     const httpAdapter = app.getHttpAdapter();
@@ -89,7 +97,10 @@ async function bootstrap() {
   );
 
   await app.listen(port);
-  Logger.log(`Ensmenu Staff BFF listening on port ${port}`, 'Bootstrap');
+  Logger.log(
+    `Ensmenu Staff BFF listening on port ${port} (role=${processRole})`,
+    'Bootstrap',
+  );
   if (upstreamDebug) {
     Logger.log(
       'Upstream debug logging enabled (UPSTREAM_DEBUG_LOG)',

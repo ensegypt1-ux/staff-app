@@ -24,6 +24,7 @@ export declare function countAttentionEntries(entries: Array<{
 }>): number;
 export declare function isMergeableServiceTableCall(raw: Record<string, unknown>): boolean;
 export declare function resolveStaffCallIdFromListRow(raw: Record<string, unknown>): number;
+export declare function resolveActivityLogRowStatus(raw: Record<string, unknown>): StaffOrderStatus;
 export declare function activityLogRowNeedsAttention(raw: Record<string, unknown>): boolean;
 export declare function countTableAttentionAcrossSources(input: {
     activityLogRows: Array<Record<string, unknown>>;

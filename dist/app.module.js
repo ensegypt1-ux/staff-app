@@ -17,8 +17,13 @@ const upstream_exception_filter_1 = require("./common/filters/upstream-exception
 const jwt_auth_guard_1 = require("./common/guards/jwt-auth.guard");
 const staff_only_guard_1 = require("./common/guards/staff-only.guard");
 const ens_backend_module_1 = require("./infrastructure/ens-backend/ens-backend.module");
+const prisma_module_1 = require("./infrastructure/prisma/prisma.module");
+const fcm_module_1 = require("./modules/fcm/fcm.module");
 const health_module_1 = require("./modules/health/health.module");
 const staff_module_1 = require("./modules/staff/staff.module");
+const processRole = (process.env.PROCESS_ROLE ?? 'api').trim().toLowerCase();
+const isApiRole = processRole === 'api' || processRole === 'all';
+const isWorkerRole = processRole === 'worker' || processRole === 'all';
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -42,8 +47,13 @@ exports.AppModule = AppModule = __decorate([
                 ],
             }),
             ens_backend_module_1.EnsBackendModule,
+            prisma_module_1.PrismaModule,
             health_module_1.HealthModule,
-            staff_module_1.StaffModule,
+            ...(isApiRole ? [staff_module_1.StaffModule] : []),
+            fcm_module_1.FcmModule.forRoot({
+                enableApi: isApiRole,
+                enableWorker: isWorkerRole,
+            }),
         ],
         providers: [
             {

@@ -17,6 +17,15 @@ const ACTION_LABELS = {
     TABLE_CALL_DELIVERED: { en: 'Mark delivered', ar: 'تم التسليم' },
     TABLE_CALL_COMPLETED: { en: 'Finish', ar: 'إنهاء' },
 };
+const DELIVERY_ACTION_LABELS = {
+    TABLE_CALL_CONFIRMED: { en: 'Accept', ar: 'قبول' },
+    TABLE_CALL_PREPARED: { en: 'Mark prepared', ar: 'تم التحضير' },
+    TABLE_CALL_DELIVERED: {
+        en: 'Mark as sent out',
+        ar: 'تم التسليم للمندوب',
+    },
+    TABLE_CALL_CANCELLED: { en: 'Reject', ar: 'رفض' },
+};
 const ACCEPT_ADDITION_LABEL = {
     en: 'Accept addition',
     ar: 'قبول الإضافة',
@@ -29,9 +38,10 @@ function availableActionsForOrder(status, auth, channel = 'table', options = {})
         .toLowerCase();
     const isService = requestKind === 'waiter' || requestKind === 'bill';
     const push = (action, labelOverride) => {
+        const deliveryLabel = channel === 'delivery' ? DELIVERY_ACTION_LABELS[action] : undefined;
         specs.push({
             action,
-            label: labelOverride ?? ACTION_LABELS[action],
+            label: labelOverride ?? deliveryLabel ?? ACTION_LABELS[action],
         });
     };
     if (isService && channel === 'table') {
@@ -52,8 +62,8 @@ function availableActionsForOrder(status, auth, channel = 'table', options = {})
         }
         switch (status) {
             case 'pending':
-                if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:prepare')) {
-                    push('TABLE_CALL_PREPARED');
+                if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:confirm')) {
+                    push('TABLE_CALL_CONFIRMED');
                 }
                 if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:cancel')) {
                     push('TABLE_CALL_CANCELLED');
@@ -114,7 +124,10 @@ function canStaffViewOrders(auth) {
 function canStaffViewHistory(auth) {
     return (0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:view');
 }
-function statusLabelFor(status) {
+function statusLabelFor(status, channel = 'table') {
+    if (channel === 'delivery') {
+        return staff_order_status_util_1.STAFF_DELIVERY_ORDER_STATUS_LABELS[status];
+    }
     return staff_order_status_util_1.STAFF_ORDER_STATUS_LABELS[status];
 }
 function permissionForOrderAction(action) {

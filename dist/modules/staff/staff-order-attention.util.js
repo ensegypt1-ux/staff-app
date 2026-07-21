@@ -9,8 +9,11 @@ exports.sortTableEntriesByAttention = sortTableEntriesByAttention;
 exports.countAttentionEntries = countAttentionEntries;
 exports.isMergeableServiceTableCall = isMergeableServiceTableCall;
 exports.resolveStaffCallIdFromListRow = resolveStaffCallIdFromListRow;
+exports.resolveActivityLogRowStatus = resolveActivityLogRowStatus;
 exports.activityLogRowNeedsAttention = activityLogRowNeedsAttention;
 exports.countTableAttentionAcrossSources = countTableAttentionAcrossSources;
+const staff_order_action_details_util_1 = require("./staff-order-action-details.util");
+const staff_order_status_util_1 = require("./staff-order-status.util");
 function parseStaffRequestKind(raw) {
     const normalized = String(raw ?? '')
         .trim()
@@ -77,11 +80,22 @@ function resolveStaffCallIdFromListRow(raw) {
     const id = Number(raw.id ?? 0);
     return Number.isFinite(id) && id > 0 ? id : 0;
 }
+function resolveActivityLogRowStatus(raw) {
+    const fromList = (0, staff_order_action_details_util_1.parseActionDetailsList)(raw.actionDetails);
+    const fromActions = (0, staff_order_action_details_util_1.buildActionDetailsFromActions)(raw.actions);
+    const actionDetails = (0, staff_order_action_details_util_1.pickRicherActionDetails)(fromActions, fromList);
+    const topLevelRaw = raw.status;
+    const topLevel = topLevelRaw == null || String(topLevelRaw).trim() === ''
+        ? undefined
+        : String(topLevelRaw).trim();
+    return (0, staff_order_status_util_1.resolveListEntryStatus)({
+        actionDetails,
+        status: topLevel,
+    });
+}
 function activityLogRowNeedsAttention(raw) {
     return entryNeedsAttention({
-        status: String(raw.status ?? 'pending')
-            .trim()
-            .toLowerCase(),
+        status: resolveActivityLogRowStatus(raw),
         pendingGuestAddition: raw.pendingGuestAddition === true,
         pendingBillRequest: raw.pendingBillRequest === true,
         requestKind: parseStaffRequestKind(raw.requestKind),

@@ -8,8 +8,14 @@ import { UpstreamExceptionFilter } from './common/filters/upstream-exception.fil
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from './common/guards/staff-only.guard';
 import { EnsBackendModule } from './infrastructure/ens-backend/ens-backend.module';
+import { PrismaModule } from './infrastructure/prisma/prisma.module';
+import { FcmModule } from './modules/fcm/fcm.module';
 import { HealthModule } from './modules/health/health.module';
 import { StaffModule } from './modules/staff/staff.module';
+
+const processRole = (process.env.PROCESS_ROLE ?? 'api').trim().toLowerCase();
+const isApiRole = processRole === 'api' || processRole === 'all';
+const isWorkerRole = processRole === 'worker' || processRole === 'all';
 
 @Module({
   imports: [
@@ -30,8 +36,13 @@ import { StaffModule } from './modules/staff/staff.module';
       ],
     }),
     EnsBackendModule,
+    PrismaModule,
     HealthModule,
-    StaffModule,
+    ...(isApiRole ? [StaffModule] : []),
+    FcmModule.forRoot({
+      enableApi: isApiRole,
+      enableWorker: isWorkerRole,
+    }),
   ],
   providers: [
     {

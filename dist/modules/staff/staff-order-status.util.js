@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STAFF_ORDER_STATUS_LABELS = void 0;
+exports.STAFF_DELIVERY_ORDER_STATUS_LABELS = exports.STAFF_ORDER_STATUS_LABELS = void 0;
 exports.normalizeStaffOrderStatus = normalizeStaffOrderStatus;
 exports.resolveLatestOrderStatus = resolveLatestOrderStatus;
 exports.resolveListEntryStatus = resolveListEntryStatus;
@@ -99,6 +99,13 @@ exports.STAFF_ORDER_STATUS_LABELS = {
     confirmed: { en: 'Accepted', ar: 'مقبول' },
     prepared: { en: 'Prepared', ar: 'تم التحضير' },
     delivered: { en: 'Delivered', ar: 'تم التسليم' },
+    cancelled: { en: 'Rejected', ar: 'مرفوض' },
+};
+exports.STAFF_DELIVERY_ORDER_STATUS_LABELS = {
+    pending: { en: 'New', ar: 'جديد' },
+    confirmed: { en: 'New', ar: 'جديد' },
+    prepared: { en: 'Ready', ar: 'جاهز' },
+    delivered: { en: 'Sent out', ar: 'تم الإرسال' },
     cancelled: { en: 'Rejected', ar: 'مرفوض' },
 };
 //# sourceMappingURL=staff-order-status.util.js.map

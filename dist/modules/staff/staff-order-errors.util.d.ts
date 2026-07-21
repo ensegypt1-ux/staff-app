@@ -9,6 +9,8 @@ type NormalizedStaffError = {
     };
 };
 export declare function isMenuAccessAuthorizationSoft404(result: EnsHttpResult): boolean;
+export declare function isFinishConflictOrMenuUpstreamError(result: EnsHttpResult): boolean;
+export declare function isPostFinishHistoryPresentationFailure(result: EnsHttpResult): boolean;
 export declare function normalizeStaffUpstreamError(result: EnsHttpResult): EnsHttpResult;
 export declare function deniedOrderResult(httpStatus: number, payload: NormalizedStaffError['data']): NormalizedStaffError;
 export declare function staffHistoryDeniedResult(): EnsHttpResult;

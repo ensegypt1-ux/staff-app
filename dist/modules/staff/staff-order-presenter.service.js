@@ -94,7 +94,11 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             governorateNameEn: this.pickString(base.governorateNameEn, overlay.governorateNameEn),
             itemsSubtotal: base.itemsSubtotal ?? overlay.itemsSubtotal,
             taxAmount: base.taxAmount ?? overlay.taxAmount,
+            taxPercent: base.taxPercent ?? overlay.taxPercent,
+            taxEnabled: base.taxEnabled ?? overlay.taxEnabled,
             serviceAmount: base.serviceAmount ?? overlay.serviceAmount,
+            servicePercent: base.servicePercent ?? overlay.servicePercent,
+            serviceEnabled: base.serviceEnabled ?? overlay.serviceEnabled,
             deliveryFee: base.deliveryFee ?? overlay.deliveryFee,
             items,
             itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
@@ -105,7 +109,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             pendingBillRequest,
             requestKind,
             status,
-            statusLabel: (0, staff_order_actions_util_1.statusLabelFor)(status),
+            statusLabel: (0, staff_order_actions_util_1.statusLabelFor)(status, base.channel),
             availableActions: (0, staff_order_actions_util_1.availableActionsForOrder)(status, auth, base.channel, { pendingGuestAddition, requestKind }),
             canEditItems: !isService &&
                 (0, staff_order_edit_permissions_util_1.resolveCanEditItems)(base.channel, auth, status),
@@ -192,7 +196,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             channel: input.channel,
             requestKind,
             status: input.status,
-            statusLabel: (0, staff_order_actions_util_1.statusLabelFor)(input.status),
+            statusLabel: (0, staff_order_actions_util_1.statusLabelFor)(input.status, input.channel),
             tableNumber: this.stringOrNull(input.raw.tableNumber),
             customerName: this.stringOrNull(input.raw.customerName),
             customerPhone: this.stringOrNull(input.raw.customerPhone),
@@ -203,7 +207,11 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             governorateNameEn: this.stringOrNull(input.raw.governorateNameEn),
             itemsSubtotal: this.numberOrNull(input.raw.itemsSubtotal),
             taxAmount: this.numberOrNull(input.raw.taxAmount),
+            taxPercent: this.numberOrNull(input.raw.taxPercent),
+            taxEnabled: this.booleanOrNull(input.raw.taxEnabled),
             serviceAmount: this.numberOrNull(input.raw.serviceAmount),
+            servicePercent: this.numberOrNull(input.raw.servicePercent),
+            serviceEnabled: this.booleanOrNull(input.raw.serviceEnabled),
             deliveryFee: this.numberOrNull(input.raw.deliveryFee),
             items: isService ? [] : input.items,
             itemCount: isService ? 0 : itemCount,
@@ -362,6 +370,15 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
     numberOrNull(value) {
         const num = Number(value);
         return Number.isFinite(num) ? num : null;
+    }
+    booleanOrNull(value) {
+        if (value === true || value === false)
+            return value;
+        if (value === 'true')
+            return true;
+        if (value === 'false')
+            return false;
+        return null;
     }
 };
 exports.StaffOrderPresenterService = StaffOrderPresenterService;

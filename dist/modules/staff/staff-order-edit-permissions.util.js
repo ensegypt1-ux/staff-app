@@ -15,6 +15,9 @@ function resolveCanEditItems(channel, auth, status) {
     if (channel !== 'table' && channel !== 'delivery') {
         return false;
     }
+    if (channel === 'delivery') {
+        return status === 'pending' || status === 'confirmed';
+    }
     return (status === 'pending' || status === 'confirmed' || status === 'prepared');
 }
 //# sourceMappingURL=staff-order-edit-permissions.util.js.map

@@ -16,5 +16,14 @@ export declare class EnvironmentVariables {
     THROTTLE_AUTH_LIMIT?: number;
     REQUEST_JSON_LIMIT?: string;
     REQUEST_URLENCODED_LIMIT?: string;
+    PROCESS_ROLE?: string;
+    DATABASE_URL?: string;
+    ENS_SOCKET_URL?: string;
+    FCM_ENABLED?: string;
+    FCM_DRY_RUN?: string;
+    FIREBASE_PROJECT_ID?: string;
+    FIREBASE_CLIENT_EMAIL?: string;
+    FIREBASE_PRIVATE_KEY?: string;
+    FIREBASE_SERVICE_ACCOUNT_JSON?: string;
 }
 export declare function validateEnv(config: Record<string, unknown>): EnvironmentVariables;

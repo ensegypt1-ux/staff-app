@@ -20,3 +20,7 @@ export declare const STAFF_ORDER_STATUS_LABELS: Record<StaffOrderStatus, {
     en: string;
     ar: string;
 }>;
+export declare const STAFF_DELIVERY_ORDER_STATUS_LABELS: Record<StaffOrderStatus, {
+    en: string;
+    ar: string;
+}>;

@@ -1,0 +1,43 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Registered Flutter FCM device tokens for staff push (BFF-owned).
+model StaffFcmDevice {
+  id              String   @id @default(cuid())
+  staffId         Int
+  menuId          Int
+  staffRoleId     Int?
+  fcmToken        String   @unique
+  platform        String
+  deviceId        String?
+  permissionsJson String
+  appVersion      String?
+  locale          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lastSeenAt      DateTime @default(now())
+
+  @@index([menuId, staffId])
+  @@index([staffId])
+  @@index([menuId])
+  @@map("staff_fcm_devices")
+}
+
+/// Idempotency log for FCM fan-out (one row per eventId).
+model FcmDeliveryLog {
+  id          String   @id @default(cuid())
+  eventId     String   @unique
+  menuId      Int
+  staffCallId Int
+  kind        String
+  createdAt   DateTime @default(now())
+
+  @@index([menuId, createdAt])
+  @@map("fcm_delivery_logs")
+}

@@ -13,7 +13,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StaffOrdersFlowService = void 0;
 const common_1 = require("@nestjs/common");
 const ens_http_service_1 = require("../../infrastructure/ens-backend/ens-http.service");
-const staff_order_actions_util_1 = require("./staff-order-actions.util");
 const staff_order_errors_util_1 = require("./staff-order-errors.util");
 const staff_capability_mapper_1 = require("./staff-capability.mapper");
 const staff_menu_scope_util_1 = require("./staff-menu-scope.util");
@@ -22,6 +21,7 @@ const staff_order_channel_util_1 = require("./staff-order-channel.util");
 const staff_order_attention_util_1 = require("./staff-order-attention.util");
 const staff_order_status_util_1 = require("./staff-order-status.util");
 const staff_order_action_details_util_1 = require("./staff-order-action-details.util");
+const staff_order_actions_util_1 = require("./staff-order-actions.util");
 const staff_table_history_filters_util_1 = require("./staff-table-history-filters.util");
 const staff_table_order_util_1 = require("./staff-table-order.util");
 const staff_table_order_creator_registry_1 = require("./staff-table-order-creator.registry");
@@ -306,10 +306,19 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
         const logId = await this.resolveActivityLogId(req, resolvedMenuId, staffCallId, activityLogId);
         let upstream;
         if (!isDeliveryCall &&
+            normalizedAction === 'TABLE_CALL_COMPLETED' &&
+            hasTableCall) {
+            upstream = await this.ensHttp.proxy({
+                method: 'PATCH',
+                path: `staff-auth/table-calls/${staffCallId}/complete`,
+                req,
+                body: {},
+            });
+        }
+        else if (!isDeliveryCall &&
             logId > 0 &&
             (normalizedAction === 'TABLE_CALL_CONFIRMED' ||
-                normalizedAction === 'TABLE_CALL_CANCELLED' ||
-                normalizedAction === 'TABLE_CALL_COMPLETED')) {
+                normalizedAction === 'TABLE_CALL_CANCELLED')) {
             upstream = await this.ensHttp.proxy({
                 method: 'POST',
                 path: `menus/${resolvedMenuId}/activity-logs/${logId}/actions`,
@@ -371,16 +380,6 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
                 body: { status },
             });
         }
-        else if (!isDeliveryCall &&
-            normalizedAction === 'TABLE_CALL_COMPLETED' &&
-            hasTableCall) {
-            upstream = await this.ensHttp.proxy({
-                method: 'PATCH',
-                path: `staff-auth/table-calls/${staffCallId}/complete`,
-                req,
-                body: {},
-            });
-        }
         else {
             return {
                 status: 403,
@@ -391,10 +390,167 @@ let StaffOrdersFlowService = StaffOrdersFlowService_1 = class StaffOrdersFlowSer
                 },
             };
         }
+        if (!isDeliveryCall &&
+            normalizedAction === 'TABLE_CALL_COMPLETED' &&
+            hasTableCall) {
+            if (upstream.status < 400) {
+                return this.presentSuccessfulTableFinish(req, staffCallId, resolvedMenuId, activityLogId, tableCallRaw, upstream);
+            }
+            return this.resolveTableFinishAfterConflict(req, staffCallId, resolvedMenuId, upstream, tableCallRaw);
+        }
         if (upstream.status >= 400) {
             return (0, staff_order_errors_util_1.normalizeStaffUpstreamError)(upstream);
         }
         return this.presentOrderMutation(req, staffCallId, resolvedMenuId, activityLogId);
+    }
+    async presentSuccessfulTableFinish(req, staffCallId, menuId, activityLogId, preFinishRaw, upstream) {
+        const rich = await this.presentOrderMutation(req, staffCallId, menuId, activityLogId);
+        if (rich.status < 400) {
+            return rich;
+        }
+        if (!(0, staff_order_errors_util_1.isPostFinishHistoryPresentationFailure)(rich)) {
+            return rich;
+        }
+        return this.presentDeliveredFinishWithFallback(req, staffCallId, menuId, activityLogId, preFinishRaw, upstream);
+    }
+    async resolveTableFinishAfterConflict(req, staffCallId, menuId, upstream, preFinishRaw) {
+        if (!(0, staff_order_errors_util_1.isFinishConflictOrMenuUpstreamError)(upstream)) {
+            return (0, staff_order_errors_util_1.normalizeStaffUpstreamError)(upstream);
+        }
+        const raw = await this.fetchTableCallRaw(req, staffCallId);
+        if (!raw) {
+            return {
+                status: 404,
+                data: {
+                    error: 'Order not found',
+                    errorAr: 'الطلب غير موجود',
+                    code: 'ORDER_NOT_FOUND',
+                },
+            };
+        }
+        const status = (0, staff_order_status_util_1.normalizeStaffOrderStatus)(raw.status);
+        if (status === 'delivered') {
+            return this.presentDeliveredFinishWithFallback(req, staffCallId, menuId, undefined, preFinishRaw ?? raw, upstream);
+        }
+        if ((0, staff_order_status_util_1.isActiveStaffOrderStatus)(status)) {
+            return {
+                status: 409,
+                data: {
+                    error: 'This order action is no longer available',
+                    errorAr: 'هذا الإجراء لم يعد متاحاً على الطلب',
+                    code: 'STAFF_ORDER_STATE_CHANGED',
+                },
+            };
+        }
+        return {
+            status: 409,
+            data: {
+                error: 'This order action is no longer available',
+                errorAr: 'هذا الإجراء لم يعد متاحاً على الطلب',
+                code: 'STAFF_ORDER_STATE_CHANGED',
+            },
+        };
+    }
+    async presentDeliveredFinishWithFallback(req, staffCallId, menuId, activityLogId, preFinishRaw, upstream) {
+        const fetched = await this.fetchTableCallRaw(req, staffCallId);
+        const raw = fetched ??
+            (preFinishRaw
+                ? { ...preFinishRaw, status: 'delivered' }
+                : null);
+        if (raw) {
+            const presented = await this.presentDeliveredFinishSuccess(req, menuId, {
+                ...raw,
+                status: 'delivered',
+            });
+            if (presented.status < 400) {
+                return presented;
+            }
+        }
+        return this.minimalDeliveredFinishSuccess(req, staffCallId, activityLogId, preFinishRaw ?? fetched, upstream);
+    }
+    async presentDeliveredFinishSuccess(req, menuId, tableRaw) {
+        const auth = await this.resolveStaffAuth(req);
+        const entry = this.presenter.presentDetail(tableRaw, auth);
+        if (!entry) {
+            return {
+                status: 404,
+                data: {
+                    error: 'Order not found',
+                    errorAr: 'الطلب غير موجود',
+                    code: 'ORDER_NOT_FOUND',
+                },
+            };
+        }
+        let scopedEntry = this.presenter.applyListScope(entry, 'history');
+        scopedEntry = await this.enrichEntryForStaff(req, menuId, auth, scopedEntry);
+        return {
+            status: 200,
+            data: {
+                staffJobRole: auth.staffJobRole,
+                permissions: auth.permissions,
+                roleName: auth.roleName,
+                roleId: auth.roleId,
+                entry: { ...scopedEntry, status: 'delivered' },
+                actions: [],
+                capabilities: this.presenter.capabilitiesFor(auth),
+            },
+        };
+    }
+    async minimalDeliveredFinishSuccess(req, staffCallId, activityLogId, identityRaw, upstream) {
+        const auth = await this.resolveStaffAuth(req);
+        const upstreamBody = upstream.data && typeof upstream.data === 'object'
+            ? upstream.data
+            : {};
+        const tableNumber = identityRaw?.tableNumber != null
+            ? String(identityRaw.tableNumber)
+            : null;
+        const customerName = identityRaw?.customerName != null
+            ? String(identityRaw.customerName)
+            : null;
+        const logId = activityLogId && activityLogId > 0
+            ? activityLogId
+            : Number(identityRaw?.activityLogId ?? 0) || null;
+        return {
+            status: 200,
+            data: {
+                staffJobRole: auth.staffJobRole,
+                permissions: auth.permissions,
+                roleName: auth.roleName,
+                roleId: auth.roleId,
+                entry: {
+                    id: String(logId ?? staffCallId),
+                    staffCallId,
+                    activityLogId: logId && logId > 0 ? logId : null,
+                    channel: 'table',
+                    requestKind: 'order',
+                    status: 'delivered',
+                    statusLabel: (0, staff_order_actions_util_1.statusLabelFor)('delivered'),
+                    items: [],
+                    itemCount: 0,
+                    totalPrice: Number(identityRaw?.orderTotal ?? identityRaw?.totalPrice ?? 0) || 0,
+                    availableActions: [],
+                    canEditItems: false,
+                    tableNumber,
+                    customerName,
+                    customerPhone: identityRaw?.customerPhone != null
+                        ? String(identityRaw.customerPhone)
+                        : null,
+                    customerAddress: null,
+                    orderNotes: null,
+                    createdAt: identityRaw?.createdAt != null
+                        ? String(identityRaw.createdAt)
+                        : null,
+                    actionDetails: [],
+                    pendingGuestAddition: false,
+                    pendingBillRequest: false,
+                    createdByStaffId: null,
+                },
+                actions: [],
+                capabilities: this.presenter.capabilitiesFor(auth),
+                finishAcknowledged: true,
+                upstreamStatus: upstreamBody.status ?? 'delivered',
+            },
+        };
     }
     async autoConfirmPendingDeliveryOrder(req, menuId, staffCallId, logId) {
         const presented = await this.getOrder(req, staffCallId, {

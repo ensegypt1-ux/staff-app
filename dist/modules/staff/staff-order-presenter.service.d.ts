@@ -38,7 +38,11 @@ export type StaffPresentedOrderEntry = {
     governorateNameEn: string | null;
     itemsSubtotal: number | null;
     taxAmount: number | null;
+    taxPercent: number | null;
+    taxEnabled: boolean | null;
     serviceAmount: number | null;
+    servicePercent: number | null;
+    serviceEnabled: boolean | null;
     deliveryFee: number | null;
     items: StaffPresentedOrderItem[];
     itemCount: number;
@@ -104,4 +108,5 @@ export declare class StaffOrderPresenterService {
     private resolveCreatedAt;
     private stringOrNull;
     private numberOrNull;
+    private booleanOrNull;
 }

@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isMenuAccessAuthorizationSoft404 = isMenuAccessAuthorizationSoft404;
+exports.isFinishConflictOrMenuUpstreamError = isFinishConflictOrMenuUpstreamError;
+exports.isPostFinishHistoryPresentationFailure = isPostFinishHistoryPresentationFailure;
 exports.normalizeStaffUpstreamError = normalizeStaffUpstreamError;
 exports.deniedOrderResult = deniedOrderResult;
 exports.staffHistoryDeniedResult = staffHistoryDeniedResult;
@@ -44,6 +46,52 @@ function isMenuAccessAuthorizationSoft404(result) {
     if (!haystack)
         return false;
     return MENU_ACCESS_SOFT_404_MARKERS.some((marker) => haystack.includes(marker.toLowerCase()));
+}
+function isFinishConflictOrMenuUpstreamError(result) {
+    if (result.status === 409)
+        return true;
+    if (isMenuAccessAuthorizationSoft404(result))
+        return true;
+    const data = result.data;
+    if (!data || typeof data !== 'object')
+        return false;
+    const body = data;
+    const code = String(body.code ?? '')
+        .trim()
+        .toUpperCase();
+    if (code === 'MENU_ACCESS_SOFT_404' || code === 'STAFF_ORDER_STATE_CHANGED') {
+        return true;
+    }
+    const haystack = [body.error, body.errorEn, body.errorAr, body.message]
+        .map((value) => String(value ?? '').trim().toLowerCase())
+        .filter((value) => value.length > 0)
+        .join(' | ');
+    if (MENU_ACCESS_SOFT_404_MARKERS.some((marker) => haystack.includes(marker.toLowerCase()))) {
+        return true;
+    }
+    if (NOT_PENDING_MARKERS.some((marker) => haystack.includes(marker))) {
+        return true;
+    }
+    return false;
+}
+function isPostFinishHistoryPresentationFailure(result) {
+    if (result.status !== 404)
+        return false;
+    const data = result.data;
+    if (!data || typeof data !== 'object')
+        return false;
+    const body = data;
+    const code = String(body.code ?? '')
+        .trim()
+        .toUpperCase();
+    if (code === 'ORDER_NOT_FOUND')
+        return true;
+    const haystack = [body.error, body.errorEn, body.errorAr, body.message]
+        .map((value) => String(value ?? '').trim().toLowerCase())
+        .filter((value) => value.length > 0)
+        .join(' | ');
+    return (haystack.includes('order not found') ||
+        haystack.includes('الطلب غير موجود'));
 }
 function normalizeStaffUpstreamError(result) {
     if (result.status < 400)
