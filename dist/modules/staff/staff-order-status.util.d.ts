@@ -14,6 +14,8 @@ export declare function resolveListEntryStatus(entry: {
 export declare function orderStatusFromAction(action: string): StaffOrderStatus;
 export declare function isActiveStaffOrderStatus(status: StaffOrderStatus): boolean;
 export declare function isHistoryStaffOrderStatus(status: StaffOrderStatus): boolean;
+export declare function staffOrderStatusLifecycleRank(status: StaffOrderStatus): number;
+export declare function preferAuthoritativeLifecycleStatus(primary: StaffOrderStatus, secondary: StaffOrderStatus): StaffOrderStatus;
 export declare const STAFF_ORDER_STATUS_LABELS: Record<StaffOrderStatus, {
     en: string;
     ar: string;

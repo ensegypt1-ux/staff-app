@@ -7,6 +7,8 @@ exports.resolveListEntryStatus = resolveListEntryStatus;
 exports.orderStatusFromAction = orderStatusFromAction;
 exports.isActiveStaffOrderStatus = isActiveStaffOrderStatus;
 exports.isHistoryStaffOrderStatus = isHistoryStaffOrderStatus;
+exports.staffOrderStatusLifecycleRank = staffOrderStatusLifecycleRank;
+exports.preferAuthoritativeLifecycleStatus = preferAuthoritativeLifecycleStatus;
 const TERMINAL = new Set([
     'confirmed',
     'cancelled',
@@ -72,6 +74,25 @@ function isActiveStaffOrderStatus(status) {
 }
 function isHistoryStaffOrderStatus(status) {
     return status === 'delivered' || status === 'cancelled';
+}
+function staffOrderStatusLifecycleRank(status) {
+    switch (status) {
+        case 'pending':
+            return 0;
+        case 'confirmed':
+            return 1;
+        case 'prepared':
+            return 2;
+        case 'delivered':
+        case 'cancelled':
+            return 3;
+    }
+}
+function preferAuthoritativeLifecycleStatus(primary, secondary) {
+    return staffOrderStatusLifecycleRank(primary) >=
+        staffOrderStatusLifecycleRank(secondary)
+        ? primary
+        : secondary;
 }
 exports.STAFF_ORDER_STATUS_LABELS = {
     pending: { en: 'Pending', ar: 'قيد الانتظار' },

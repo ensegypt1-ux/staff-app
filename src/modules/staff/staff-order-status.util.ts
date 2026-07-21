@@ -84,6 +84,38 @@ export function isHistoryStaffOrderStatus(status: StaffOrderStatus): boolean {
   return status === 'delivered' || status === 'cancelled';
 }
 
+/**
+ * Lifecycle rank for merge/hydration — higher means further along.
+ * Used so stale pending table-call overlays cannot regress confirmed+.
+ */
+export function staffOrderStatusLifecycleRank(status: StaffOrderStatus): number {
+  switch (status) {
+    case 'pending':
+      return 0;
+    case 'confirmed':
+      return 1;
+    case 'prepared':
+      return 2;
+    case 'delivered':
+    case 'cancelled':
+      return 3;
+  }
+}
+
+/**
+ * Prefer the lifecycle status that is ahead. Never let a lower-rank overlay
+ * (e.g. pending hydration) overwrite activity-log confirmed/prepared/etc.
+ */
+export function preferAuthoritativeLifecycleStatus(
+  primary: StaffOrderStatus,
+  secondary: StaffOrderStatus,
+): StaffOrderStatus {
+  return staffOrderStatusLifecycleRank(primary) >=
+    staffOrderStatusLifecycleRank(secondary)
+    ? primary
+    : secondary;
+}
+
 export const STAFF_ORDER_STATUS_LABELS: Record<
   StaffOrderStatus,
   { en: string; ar: string }

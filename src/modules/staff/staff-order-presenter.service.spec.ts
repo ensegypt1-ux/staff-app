@@ -289,6 +289,60 @@ describe('StaffOrderPresenterService', () => {
 
     expect(merged.actionDetails).toEqual(base.actionDetails);
     expect(merged.tableNumber).toBe('7');
+    expect(merged.status).toBe('prepared');
+  });
+
+  it('mergeCallHydration does not regress confirmed to pending overlay', () => {
+    const base = presenter.presentListRow(
+      {
+        id: 502,
+        orderId: 99,
+        // Express activity-logs often omit top-level status; history carries it.
+        actionDetails: [
+          {
+            action: 'TABLE_CALL_CREATED',
+            status: 'pending',
+            waiterName: '',
+            time: '2026-01-01T09:00:00Z',
+          },
+          {
+            action: 'TABLE_CALL_CONFIRMED',
+            status: 'confirmed',
+            waiterName: 'Cashier',
+            time: '2026-01-01T09:01:00Z',
+          },
+        ],
+        tableNumber: '12',
+        type: 'table',
+        items: [{ name: 'Coffee', quantity: 1, price: 3, total: 3 }],
+      },
+      cashierAuth(),
+      'table',
+    )!;
+    expect(base.status).toBe('confirmed');
+
+    const merged = presenter.mergeCallHydration(
+      base,
+      {
+        id: 99,
+        status: 'pending',
+        tableNumber: '12',
+        items: [{ name: 'Coffee', quantity: 1, price: 3, total: 3 }],
+        at: '2026-01-01T09:00:00Z',
+      },
+      cashierAuth(),
+    );
+
+    expect(merged.status).toBe('confirmed');
+    expect(merged.statusLabel).toEqual({ en: 'Accepted', ar: 'مقبول' });
+    expect(merged.availableActions.map((a) => a.action)).toEqual([
+      'TABLE_CALL_COMPLETED',
+    ]);
+    expect(merged.availableActions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: 'TABLE_CALL_CONFIRMED' }),
+      ]),
+    );
   });
 
   it('presentDetail and presentListRow expose action field on actionDetails', () => {

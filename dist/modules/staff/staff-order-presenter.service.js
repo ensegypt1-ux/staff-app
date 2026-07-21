@@ -60,14 +60,25 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
         }, auth);
         if (!hydrated)
             return entry;
-        return this.mergeEntryFields(entry, hydrated);
+        return this.mergeEntryFields(entry, hydrated, auth);
     }
-    mergeEntryFields(base, overlay) {
+    mergeEntryFields(base, overlay, auth) {
         const items = base.items.length > 0
             ? base.items
             : overlay.items.length > 0
                 ? overlay.items
                 : base.items;
+        const actionDetails = (0, staff_order_action_details_util_1.pickRicherActionDetails)(base.actionDetails, overlay.actionDetails);
+        const fromActions = (0, staff_order_status_util_1.resolveLatestOrderStatus)(actionDetails);
+        const status = (0, staff_order_status_util_1.preferAuthoritativeLifecycleStatus)((0, staff_order_status_util_1.preferAuthoritativeLifecycleStatus)(base.status, fromActions), overlay.status);
+        const pendingGuestAddition = base.pendingGuestAddition || overlay.pendingGuestAddition;
+        const pendingBillRequest = base.pendingBillRequest || overlay.pendingBillRequest;
+        const requestKind = (0, staff_order_attention_util_1.isServiceRequestKind)(base.requestKind)
+            ? base.requestKind
+            : (0, staff_order_attention_util_1.isServiceRequestKind)(overlay.requestKind)
+                ? overlay.requestKind
+                : base.requestKind;
+        const isService = (0, staff_order_attention_util_1.isServiceRequestKind)(requestKind);
         return {
             ...overlay,
             id: base.id,
@@ -86,16 +97,15 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
             itemCount: items.reduce((sum, line) => sum + line.quantity, 0),
             totalPrice: base.totalPrice > 0 ? base.totalPrice : overlay.totalPrice,
             createdAt: base.createdAt ?? overlay.createdAt,
-            actionDetails: (0, staff_order_action_details_util_1.pickRicherActionDetails)(base.actionDetails, overlay.actionDetails),
-            pendingGuestAddition: base.pendingGuestAddition || overlay.pendingGuestAddition,
-            pendingBillRequest: base.pendingBillRequest || overlay.pendingBillRequest,
-            requestKind: (0, staff_order_attention_util_1.isServiceRequestKind)(base.requestKind)
-                ? base.requestKind
-                : (0, staff_order_attention_util_1.isServiceRequestKind)(overlay.requestKind)
-                    ? overlay.requestKind
-                    : base.requestKind,
-            availableActions: base.availableActions,
-            canEditItems: base.canEditItems,
+            actionDetails,
+            pendingGuestAddition,
+            pendingBillRequest,
+            requestKind,
+            status,
+            statusLabel: (0, staff_order_actions_util_1.statusLabelFor)(status),
+            availableActions: (0, staff_order_actions_util_1.availableActionsForOrder)(status, auth, base.channel, { pendingGuestAddition }),
+            canEditItems: !isService &&
+                (0, staff_order_edit_permissions_util_1.resolveCanEditItems)(base.channel, auth, status),
             createdByStaffId: null,
             waitingForCashierApproval: false,
         };

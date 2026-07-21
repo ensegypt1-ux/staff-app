@@ -11,6 +11,7 @@ import {
 import {
   isActiveStaffOrderStatus,
   isHistoryStaffOrderStatus,
+  preferAuthoritativeLifecycleStatus,
   resolveLatestOrderStatus,
   resolveListEntryStatus,
   StaffOrderStatus,
@@ -181,13 +182,14 @@ export class StaffOrderPresenterService {
     );
     if (!hydrated) return entry;
 
-    return this.mergeEntryFields(entry, hydrated);
+    return this.mergeEntryFields(entry, hydrated, auth);
   }
 
   /** Merge table-call hydration without clobbering activity-log delivery fields. */
   private mergeEntryFields(
     base: StaffPresentedOrderEntry,
     overlay: StaffPresentedOrderEntry,
+    auth: StaffResolvedAuth,
   ): StaffPresentedOrderEntry {
     const items =
       base.items.length > 0
@@ -195,6 +197,29 @@ export class StaffOrderPresenterService {
         : overlay.items.length > 0
           ? overlay.items
           : base.items;
+
+    const actionDetails = pickRicherActionDetails(
+      base.actionDetails,
+      overlay.actionDetails,
+    );
+
+    // Activity-log / action history wins when ahead of a stale pending overlay.
+    const fromActions = resolveLatestOrderStatus(actionDetails);
+    const status = preferAuthoritativeLifecycleStatus(
+      preferAuthoritativeLifecycleStatus(base.status, fromActions),
+      overlay.status,
+    );
+
+    const pendingGuestAddition =
+      base.pendingGuestAddition || overlay.pendingGuestAddition;
+    const pendingBillRequest =
+      base.pendingBillRequest || overlay.pendingBillRequest;
+    const requestKind = isServiceRequestKind(base.requestKind)
+      ? base.requestKind
+      : isServiceRequestKind(overlay.requestKind)
+        ? overlay.requestKind
+        : base.requestKind;
+    const isService = isServiceRequestKind(requestKind);
 
     return {
       ...overlay,
@@ -224,21 +249,21 @@ export class StaffOrderPresenterService {
       totalPrice:
         base.totalPrice > 0 ? base.totalPrice : overlay.totalPrice,
       createdAt: base.createdAt ?? overlay.createdAt,
-      actionDetails: pickRicherActionDetails(
-        base.actionDetails,
-        overlay.actionDetails,
+      actionDetails,
+      pendingGuestAddition,
+      pendingBillRequest,
+      requestKind,
+      status,
+      statusLabel: statusLabelFor(status),
+      availableActions: availableActionsForOrder(
+        status,
+        auth,
+        base.channel,
+        { pendingGuestAddition },
       ),
-      pendingGuestAddition:
-        base.pendingGuestAddition || overlay.pendingGuestAddition,
-      pendingBillRequest:
-        base.pendingBillRequest || overlay.pendingBillRequest,
-      requestKind: isServiceRequestKind(base.requestKind)
-        ? base.requestKind
-        : isServiceRequestKind(overlay.requestKind)
-          ? overlay.requestKind
-          : base.requestKind,
-      availableActions: base.availableActions,
-      canEditItems: base.canEditItems,
+      canEditItems:
+        !isService &&
+        resolveCanEditItems(base.channel, auth, status),
       createdByStaffId: null,
       waitingForCashierApproval: false,
     };
