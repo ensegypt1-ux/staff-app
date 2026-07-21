@@ -18,7 +18,7 @@ export function isServiceRequestKind(kind: StaffRequestKind): boolean {
   return kind === 'waiter' || kind === 'bill';
 }
 
-/** Web `isPendingOrder` + Staff service rows (waiter / orphan bill). */
+/** Web `isPendingOrder` + pending Staff service rows (waiter / orphan bill). */
 export function entryNeedsAttention(entry: {
   status: StaffOrderStatus | string;
   pendingGuestAddition?: boolean;
@@ -26,18 +26,21 @@ export function entryNeedsAttention(entry: {
   requestKind?: StaffRequestKind | string;
 }): boolean {
   const kind = parseStaffRequestKind(entry.requestKind);
+  const isService = kind === 'waiter' || kind === 'bill';
+  // Service rows only need attention while still pending.
+  if (isService) {
+    return entry.status === 'pending';
+  }
   return (
     entry.status === 'pending' ||
     entry.pendingGuestAddition === true ||
-    entry.pendingBillRequest === true ||
-    kind === 'waiter' ||
-    kind === 'bill'
+    entry.pendingBillRequest === true
   );
 }
 
 /**
  * Sort priority (lower = higher):
- * 0 bill (flag or orphan) → 1 guest addition → 2 waiter → 3 pending order → 4 rest
+ * 0 bill (flag or pending orphan) → 1 guest addition → 2 pending waiter → 3 pending order → 4 rest
  */
 export function attentionSortRank(entry: {
   status: StaffOrderStatus | string;
@@ -46,9 +49,15 @@ export function attentionSortRank(entry: {
   requestKind?: StaffRequestKind | string;
 }): number {
   const kind = parseStaffRequestKind(entry.requestKind);
-  if (entry.pendingBillRequest === true || kind === 'bill') return 0;
+  const pendingService = entry.status === 'pending';
+  if (
+    entry.pendingBillRequest === true ||
+    (kind === 'bill' && pendingService)
+  ) {
+    return 0;
+  }
   if (entry.pendingGuestAddition === true) return 1;
-  if (kind === 'waiter') return 2;
+  if (kind === 'waiter' && pendingService) return 2;
   if (entry.status === 'pending') return 3;
   return 4;
 }
@@ -80,7 +89,13 @@ export function countAttentionEntries(
 export function isMergeableServiceTableCall(
   raw: Record<string, unknown>,
 ): boolean {
-  return isServiceRequestKind(parseStaffRequestKind(raw.requestKind));
+  if (!isServiceRequestKind(parseStaffRequestKind(raw.requestKind))) {
+    return false;
+  }
+  const status = String(raw.status ?? 'pending')
+    .trim()
+    .toLowerCase();
+  return status === 'pending' || status === '';
 }
 
 /** Staff call id from activity-log list row (`orderId` preferred over log `id`). */

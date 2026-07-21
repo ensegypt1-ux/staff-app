@@ -148,6 +148,23 @@ describe('StaffOrderPresenterService', () => {
     ]);
   });
 
+  it('confirmed waiter service row has no food lifecycle actions', () => {
+    const entry = presenter.presentListRow(
+      {
+        id: 89,
+        orderId: 89,
+        tableNumber: '7',
+        requestKind: 'waiter',
+        status: 'confirmed',
+        items: [],
+      },
+      cashierAuth(),
+      'table',
+    );
+    expect(entry!.availableActions).toEqual([]);
+    expect(entry!.canEditItems).toBe(false);
+  });
+
   it('canEditItems is false for delivered and cancelled table orders', () => {
     for (const status of ['delivered', 'cancelled'] as const) {
       const entry = presenter.presentTableCallRow(

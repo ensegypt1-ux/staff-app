@@ -25,19 +25,24 @@ function isServiceRequestKind(kind) {
 }
 function entryNeedsAttention(entry) {
     const kind = parseStaffRequestKind(entry.requestKind);
+    const isService = kind === 'waiter' || kind === 'bill';
+    if (isService) {
+        return entry.status === 'pending';
+    }
     return (entry.status === 'pending' ||
         entry.pendingGuestAddition === true ||
-        entry.pendingBillRequest === true ||
-        kind === 'waiter' ||
-        kind === 'bill');
+        entry.pendingBillRequest === true);
 }
 function attentionSortRank(entry) {
     const kind = parseStaffRequestKind(entry.requestKind);
-    if (entry.pendingBillRequest === true || kind === 'bill')
+    const pendingService = entry.status === 'pending';
+    if (entry.pendingBillRequest === true ||
+        (kind === 'bill' && pendingService)) {
         return 0;
+    }
     if (entry.pendingGuestAddition === true)
         return 1;
-    if (kind === 'waiter')
+    if (kind === 'waiter' && pendingService)
         return 2;
     if (entry.status === 'pending')
         return 3;
@@ -57,7 +62,13 @@ function countAttentionEntries(entries) {
     return entries.filter(entryNeedsAttention).length;
 }
 function isMergeableServiceTableCall(raw) {
-    return isServiceRequestKind(parseStaffRequestKind(raw.requestKind));
+    if (!isServiceRequestKind(parseStaffRequestKind(raw.requestKind))) {
+        return false;
+    }
+    const status = String(raw.status ?? 'pending')
+        .trim()
+        .toLowerCase();
+    return status === 'pending' || status === '';
 }
 function resolveStaffCallIdFromListRow(raw) {
     const orderId = Number(raw.orderId ?? 0);

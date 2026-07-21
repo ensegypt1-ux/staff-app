@@ -12,6 +12,7 @@ export type StaffOrderActionSpec = {
 type AuthCaps = StaffResolvedAuth | StaffMappedCapabilities;
 export type AvailableActionsOptions = {
     pendingGuestAddition?: boolean;
+    requestKind?: 'order' | 'waiter' | 'bill' | string;
 };
 export declare function availableActionsForOrder(status: StaffOrderStatus, auth: AuthCaps, channel?: StaffOrderChannel, options?: AvailableActionsOptions): StaffOrderActionSpec[];
 export declare function canStaffProcessOrders(auth: AuthCaps): boolean;

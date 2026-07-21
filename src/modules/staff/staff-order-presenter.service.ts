@@ -368,7 +368,7 @@ export class StaffOrderPresenterService {
       input.status,
       input.auth,
       input.channel,
-      { pendingGuestAddition },
+      { pendingGuestAddition, requestKind },
     );
     const canEditItems =
       !isService &&

@@ -41,6 +41,8 @@ type AuthCaps = StaffResolvedAuth | StaffMappedCapabilities;
 
 export type AvailableActionsOptions = {
   pendingGuestAddition?: boolean;
+  /** Standalone waiter / orphan-bill service request (not a food order). */
+  requestKind?: 'order' | 'waiter' | 'bill' | string;
 };
 
 /** Available order actions — mirrors Web `OrderActionButtons.actionsForStatus`. */
@@ -52,6 +54,10 @@ export function availableActionsForOrder(
 ): StaffOrderActionSpec[] {
   const specs: StaffOrderActionSpec[] = [];
   const pendingGuestAddition = options.pendingGuestAddition === true;
+  const requestKind = String(options.requestKind ?? 'order')
+    .trim()
+    .toLowerCase();
+  const isService = requestKind === 'waiter' || requestKind === 'bill';
 
   const push = (
     action: StaffOrderActionType,
@@ -62,6 +68,20 @@ export function availableActionsForOrder(
       label: labelOverride ?? ACTION_LABELS[action],
     });
   };
+
+  // Standalone service requests: Accept / Reject only while pending.
+  if (isService && channel === 'table') {
+    if (status !== 'pending') {
+      return specs;
+    }
+    if (staffHasPermission(auth, 'orders:confirm')) {
+      push('TABLE_CALL_CONFIRMED');
+    }
+    if (staffHasPermission(auth, 'orders:cancel')) {
+      push('TABLE_CALL_CANCELLED');
+    }
+    return specs;
+  }
 
   if (channel === 'delivery') {
     if (!staffHasPermission(auth, 'delivery:view')) {

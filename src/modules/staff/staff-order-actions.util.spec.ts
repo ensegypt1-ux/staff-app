@@ -113,12 +113,41 @@ describe('availableActionsForOrder (Web table parity)', () => {
     );
   });
 
+  it('service waiter pending offers Accept/Reject only', () => {
+    const actions = availableActionsForOrder(
+      'pending',
+      cashierAuth(),
+      'table',
+      { requestKind: 'waiter' },
+    );
+    expect(actions.map((a) => a.action)).toEqual([
+      'TABLE_CALL_CONFIRMED',
+      'TABLE_CALL_CANCELLED',
+    ]);
+  });
+
+  it('service waiter confirmed exposes no Finish/Prepare/Deliver', () => {
+    expect(
+      availableActionsForOrder('confirmed', cashierAuth(), 'table', {
+        requestKind: 'waiter',
+      }).map((a) => a.action),
+    ).toEqual([]);
+  });
+
+  it('orphan bill pending offers Accept/Reject only', () => {
+    expect(
+      availableActionsForOrder('pending', waiterAuth(), 'table', {
+        requestKind: 'bill',
+      }).map((a) => a.action),
+    ).toEqual(['TABLE_CALL_CONFIRMED', 'TABLE_CALL_CANCELLED']);
+  });
+
   it('canStaffViewDelivery follows delivery:view', () => {
     expect(canStaffViewDelivery(waiterAuth())).toBe(false);
     expect(canStaffViewDelivery(cashierAuth())).toBe(true);
   });
 
-  it('custom role with complete can finish', () => {
+  it('custom role with complete can finish food orders', () => {
     const auth = authFromPermissions([
       'orders:view',
       'orders:confirm',

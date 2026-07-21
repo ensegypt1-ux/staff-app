@@ -24,12 +24,28 @@ const ACCEPT_ADDITION_LABEL = {
 function availableActionsForOrder(status, auth, channel = 'table', options = {}) {
     const specs = [];
     const pendingGuestAddition = options.pendingGuestAddition === true;
+    const requestKind = String(options.requestKind ?? 'order')
+        .trim()
+        .toLowerCase();
+    const isService = requestKind === 'waiter' || requestKind === 'bill';
     const push = (action, labelOverride) => {
         specs.push({
             action,
             label: labelOverride ?? ACTION_LABELS[action],
         });
     };
+    if (isService && channel === 'table') {
+        if (status !== 'pending') {
+            return specs;
+        }
+        if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:confirm')) {
+            push('TABLE_CALL_CONFIRMED');
+        }
+        if ((0, staff_capability_mapper_1.staffHasPermission)(auth, 'orders:cancel')) {
+            push('TABLE_CALL_CANCELLED');
+        }
+        return specs;
+    }
     if (channel === 'delivery') {
         if (!(0, staff_capability_mapper_1.staffHasPermission)(auth, 'delivery:view')) {
             return specs;

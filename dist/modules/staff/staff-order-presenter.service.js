@@ -179,7 +179,7 @@ let StaffOrderPresenterService = class StaffOrderPresenterService {
         const pendingBillRequest = input.raw.pendingBillRequest === true;
         const requestKind = (0, staff_order_attention_util_1.parseStaffRequestKind)(input.raw.requestKind);
         const isService = (0, staff_order_attention_util_1.isServiceRequestKind)(requestKind);
-        const availableActions = (0, staff_order_actions_util_1.availableActionsForOrder)(input.status, input.auth, input.channel, { pendingGuestAddition });
+        const availableActions = (0, staff_order_actions_util_1.availableActionsForOrder)(input.status, input.auth, input.channel, { pendingGuestAddition, requestKind });
         const canEditItems = !isService &&
             (0, staff_order_edit_permissions_util_1.resolveCanEditItems)(input.channel, input.auth, input.status);
         return {

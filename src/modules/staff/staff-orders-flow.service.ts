@@ -38,6 +38,8 @@ import {
   countAttentionEntries,
   countTableAttentionAcrossSources,
   isMergeableServiceTableCall,
+  isServiceRequestKind,
+  parseStaffRequestKind,
   sortTableEntriesByAttention,
   TABLE_ATTENTION_COUNT_MAX_SCAN_ROWS,
 } from './staff-order-attention.util';
@@ -439,6 +441,43 @@ export class StaffOrdersFlowService {
     const hasTableCall = tableCallRaw != null;
     const isDeliveryCall =
       tableCallRaw != null && isDeliveryUpstreamRow(tableCallRaw);
+    const serviceKind = tableCallRaw
+      ? parseStaffRequestKind(tableCallRaw.requestKind)
+      : 'order';
+    const isServiceCall = isServiceRequestKind(serviceKind);
+
+    // Standalone waiter / orphan bill: Accept/Reject via table-call status only.
+    if (isServiceCall) {
+      if (
+        normalizedAction !== 'TABLE_CALL_CONFIRMED' &&
+        normalizedAction !== 'TABLE_CALL_CANCELLED'
+      ) {
+        return {
+          status: 403,
+          data: {
+            error: 'Action not allowed for service requests',
+            errorAr: 'هذا الإجراء غير مسموح لطلبات الخدمة',
+            code: 'STAFF_ACTION_DENIED',
+          },
+        };
+      }
+      const status = orderStatusFromAction(normalizedAction);
+      const upstream = await this.ensHttp.proxy({
+        method: 'PATCH',
+        path: `staff-auth/table-calls/${staffCallId}/status`,
+        req,
+        body: { status },
+      });
+      if (upstream.status >= 400) {
+        return normalizeStaffUpstreamError(upstream);
+      }
+      return this.presentOrderMutation(
+        req,
+        staffCallId,
+        resolvedMenuId,
+        activityLogId,
+      );
+    }
 
     const logId = await this.resolveActivityLogId(
       req,

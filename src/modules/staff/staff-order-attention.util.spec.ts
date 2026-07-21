@@ -53,14 +53,26 @@ describe('staff-order-attention.util', () => {
     expect(parseStaffRequestKind('bill')).toBe('bill');
   });
 
-  it('isMergeableServiceTableCall only waiter/bill', () => {
+  it('isMergeableServiceTableCall only pending waiter/bill', () => {
     expect(isMergeableServiceTableCall({ requestKind: 'waiter' })).toBe(true);
+    expect(
+      isMergeableServiceTableCall({
+        requestKind: 'waiter',
+        status: 'pending',
+      }),
+    ).toBe(true);
+    expect(
+      isMergeableServiceTableCall({
+        requestKind: 'waiter',
+        status: 'confirmed',
+      }),
+    ).toBe(false);
     expect(isMergeableServiceTableCall({ requestKind: 'bill' })).toBe(true);
     expect(isMergeableServiceTableCall({ requestKind: 'order' })).toBe(false);
     expect(isMergeableServiceTableCall({})).toBe(false);
   });
 
-  it('entryNeedsAttention matches Web + service rows', () => {
+  it('entryNeedsAttention matches Web + pending service rows only', () => {
     expect(entryNeedsAttention(entry({ status: 'pending' }))).toBe(true);
     expect(
       entryNeedsAttention(
@@ -77,6 +89,16 @@ describe('staff-order-attention.util', () => {
         entry({ status: 'pending', requestKind: 'waiter' }),
       ),
     ).toBe(true);
+    expect(
+      entryNeedsAttention(
+        entry({ status: 'confirmed', requestKind: 'waiter' }),
+      ),
+    ).toBe(false);
+    expect(
+      entryNeedsAttention(
+        entry({ status: 'confirmed', requestKind: 'bill' }),
+      ),
+    ).toBe(false);
     expect(
       entryNeedsAttention(entry({ status: 'confirmed', requestKind: 'order' })),
     ).toBe(false);
@@ -155,6 +177,13 @@ describe('staff-order-attention.util', () => {
         id: 4,
       }),
     ).toBe(true);
+    expect(
+      activityLogRowNeedsAttention({
+        status: 'confirmed',
+        requestKind: 'waiter',
+        id: 41,
+      }),
+    ).toBe(false);
     expect(
       activityLogRowNeedsAttention({
         status: 'confirmed',
