@@ -50,6 +50,11 @@ export class EnvironmentVariables {
   @IsString()
   UPSTREAM_DEBUG_LOG?: string;
 
+  /** Production-safe timing logs (route + upstream status/duration only). */
+  @IsOptional()
+  @IsString()
+  PERF_TIMING_LOG?: string;
+
   @IsOptional()
   @IsInt()
   @Min(1000)

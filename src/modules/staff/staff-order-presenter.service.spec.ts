@@ -125,7 +125,7 @@ describe('StaffOrderPresenterService', () => {
     ]);
   });
 
-  it('presents waiter service rows with Accept/Reject and no edit', () => {
+  it('presents waiter service rows with Done only and no edit', () => {
     const entry = presenter.presentListRow(
       {
         id: 88,
@@ -144,7 +144,6 @@ describe('StaffOrderPresenterService', () => {
     expect(entry!.canEditItems).toBe(false);
     expect(entry!.availableActions.map((a) => a.action)).toEqual([
       'TABLE_CALL_CONFIRMED',
-      'TABLE_CALL_CANCELLED',
     ]);
   });
 

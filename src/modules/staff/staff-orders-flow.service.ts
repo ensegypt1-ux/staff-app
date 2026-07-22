@@ -85,6 +85,7 @@ type StaffAuthRequestCache = {
 };
 
 const STAFF_AUTH_CACHE = Symbol('staffAuthCache');
+const STAFF_AUTH_INFLIGHT = Symbol('staffAuthInflight');
 
 @Injectable()
 export class StaffOrdersFlowService {
@@ -108,71 +109,91 @@ export class StaffOrdersFlowService {
   }
 
   /**
-   * Load Express `/staff-auth/me` once per request.
+   * Load Express `/staff-auth/me` once per successful auth per request.
+   * Concurrent callers share one in-flight lookup. Failures are never cached.
    * Authorization uses `permissions[]` only; `staffJobRole` is deprecated metadata.
    */
   async resolveStaffAuth(req: Request): Promise<StaffResolvedAuth> {
-    const cached = (
-      req as Request & { [STAFF_AUTH_CACHE]?: StaffAuthRequestCache }
-    )[STAFF_AUTH_CACHE];
+    const reqAuth = req as Request & {
+      [STAFF_AUTH_CACHE]?: StaffAuthRequestCache;
+      [STAFF_AUTH_INFLIGHT]?: Promise<StaffResolvedAuth>;
+    };
+
+    const cached = reqAuth[STAFF_AUTH_CACHE];
     if (cached) return cached.auth;
 
-    let auth = emptyStaffResolvedAuth();
-    let menuSlug: string | null = null;
+    const inflight = reqAuth[STAFF_AUTH_INFLIGHT];
+    if (inflight) return inflight;
 
+    const pending = this.loadStaffAuth(req).finally(() => {
+      Reflect.deleteProperty(reqAuth, STAFF_AUTH_INFLIGHT);
+    });
+    Object.defineProperty(reqAuth, STAFF_AUTH_INFLIGHT, {
+      value: pending,
+      writable: false,
+      enumerable: false,
+      configurable: true,
+    });
+    return pending;
+  }
+
+  private async loadStaffAuth(req: Request): Promise<StaffResolvedAuth> {
     try {
       const me = await this.ensHttp.proxy({
         method: 'GET',
         path: 'staff-auth/me',
         req,
       });
-      if (me.status < 400) {
-        const payload = (me.data as Record<string, unknown> | null) ?? {};
-        const staff =
-          payload.staff && typeof payload.staff === 'object'
-            ? (payload.staff as Record<string, unknown>)
-            : null;
-        const roleObj =
-          payload.role && typeof payload.role === 'object'
-            ? (payload.role as Record<string, unknown>)
-            : null;
-
-        const roleIdRaw = staff?.roleId ?? roleObj?.id ?? null;
-        const roleIdNum = Number(roleIdRaw);
-        const roleId =
-          roleIdRaw != null && Number.isFinite(roleIdNum) ? roleIdNum : null;
-
-        const roleNameRaw = staff?.roleName ?? roleObj?.name ?? null;
-        const roleName =
-          roleNameRaw != null && String(roleNameRaw).trim().length > 0
-            ? String(roleNameRaw).trim()
-            : null;
-
-        auth = buildStaffResolvedAuth({
-          permissions: payload.permissions,
-          roleName,
-          roleId,
-          legacyRole: staff?.role,
-        });
-
-        const menu =
-          payload.menu && typeof payload.menu === 'object'
-            ? (payload.menu as Record<string, unknown>)
-            : null;
-        const slug = String(menu?.slug ?? '').trim();
-        if (slug.length > 0) menuSlug = slug;
+      if (me.status >= 400) {
+        // Do not cache authentication failures.
+        return emptyStaffResolvedAuth();
       }
-    } catch {
-      /* fail closed with empty permissions */
-    }
 
-    Object.defineProperty(req, STAFF_AUTH_CACHE, {
-      value: { auth, menuSlug } satisfies StaffAuthRequestCache,
-      writable: false,
-      enumerable: false,
-      configurable: true,
-    });
-    return auth;
+      const payload = (me.data as Record<string, unknown> | null) ?? {};
+      const staff =
+        payload.staff && typeof payload.staff === 'object'
+          ? (payload.staff as Record<string, unknown>)
+          : null;
+      const roleObj =
+        payload.role && typeof payload.role === 'object'
+          ? (payload.role as Record<string, unknown>)
+          : null;
+
+      const roleIdRaw = staff?.roleId ?? roleObj?.id ?? null;
+      const roleIdNum = Number(roleIdRaw);
+      const roleId =
+        roleIdRaw != null && Number.isFinite(roleIdNum) ? roleIdNum : null;
+
+      const roleNameRaw = staff?.roleName ?? roleObj?.name ?? null;
+      const roleName =
+        roleNameRaw != null && String(roleNameRaw).trim().length > 0
+          ? String(roleNameRaw).trim()
+          : null;
+
+      const auth = buildStaffResolvedAuth({
+        permissions: payload.permissions,
+        roleName,
+        roleId,
+        legacyRole: staff?.role,
+      });
+
+      const menu =
+        payload.menu && typeof payload.menu === 'object'
+          ? (payload.menu as Record<string, unknown>)
+          : null;
+      const slug = String(menu?.slug ?? '').trim();
+      const menuSlug = slug.length > 0 ? slug : null;
+
+      Object.defineProperty(req, STAFF_AUTH_CACHE, {
+        value: { auth, menuSlug } satisfies StaffAuthRequestCache,
+        writable: false,
+        enumerable: false,
+        configurable: true,
+      });
+      return auth;
+    } catch {
+      return emptyStaffResolvedAuth();
+    }
   }
 
   /** Staff id from verified JWT identity (`MenuStaff.id`). */
@@ -1438,8 +1459,15 @@ export class StaffOrdersFlowService {
 
   private async resolveTableAttentionPendingCountFromTableCalls(
     req: Request,
+    pendingRows?: Record<string, unknown>[],
   ): Promise<number> {
-    const pendingRows = await this.fetchAllPendingTableCallRows(req);
+    const rows = pendingRows ?? (await this.fetchAllPendingTableCallRows(req));
+    return this.countPendingTableCallAttention(rows);
+  }
+
+  private countPendingTableCallAttention(
+    pendingRows: Record<string, unknown>[],
+  ): number {
     return countAttentionEntries(
       pendingRows.map((raw) => ({
         status: String(raw.status ?? 'pending')
@@ -1822,11 +1850,12 @@ export class StaffOrdersFlowService {
       return this.listTableHistory(req, auth, channel, page, limit, query);
     }
 
-    const [pendingRows, historyRows, pendingCount] = await Promise.all([
+    // Fetch pending once — history can run in parallel; pendingCount reuses rows.
+    const [pendingRows, historyRows] = await Promise.all([
       this.fetchAllPendingTableCallRows(req),
       this.fetchTableCallHistoryRowsForFallback(req),
-      this.resolveTableAttentionPendingCountFromTableCalls(req),
     ]);
+    const pendingCount = this.countPendingTableCallAttention(pendingRows);
 
     const pendingIds = new Set(
       pendingRows
@@ -2535,9 +2564,13 @@ export class StaffOrdersFlowService {
     grace: StaffPresentedOrderEntry[],
     limit: number,
   ): StaffPresentedOrderEntry[] {
+    // Attention rows from the operational page (pending food / merged waiter /
+    // bill) must win over grace terminals. Prepending grace previously let
+    // slice(limit) drop brand-new pending orders — floor stayed idle while
+    // pendingCount still rose.
     const merged = this.dedupeEntriesByStaffCallId([
-      ...grace,
       ...pageEntries,
+      ...grace,
     ]);
     return merged.slice(0, Math.max(limit, pageEntries.length));
   }

@@ -31,6 +31,8 @@ export default () => {
       10,
     ),
     upstreamDebugLog: process.env.UPSTREAM_DEBUG_LOG === 'true',
+    /** Safe route/upstream duration logs (no tokens/bodies). Allowed in production. */
+    perfTimingLog: parseBool(process.env.PERF_TIMING_LOG, false),
     upstreamTimeoutMs: parseInt(process.env.UPSTREAM_TIMEOUT_MS ?? '30000', 10),
     requestJsonLimit: process.env.REQUEST_JSON_LIMIT ?? '1mb',
     requestUrlencodedLimit: process.env.REQUEST_URLENCODED_LIMIT ?? '1mb',

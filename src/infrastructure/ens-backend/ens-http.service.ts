@@ -10,6 +10,12 @@ import { AxiosError, AxiosRequestConfig, Method } from 'axios';
 import { Request } from 'express';
 import { firstValueFrom } from 'rxjs';
 import { pickForwardHeaders } from '../../common/utils/forward-headers.util';
+import {
+  authFingerprintFromRequest,
+  buildUpstreamCacheKey,
+  coalesceRequestUpstream,
+  getRequestPerfRoute,
+} from '../../common/utils/request-upstream-cache.util';
 import { ApiKeyService } from './api-key.service';
 
 export interface EnsHttpResult {
@@ -25,6 +31,11 @@ export interface EnsProxyOptions {
   query?: Record<string, unknown>;
   headers?: Record<string, string>;
   timeoutMs?: number;
+  /**
+   * GET default `request`: coalesce in-flight + reuse 2xx for this HTTP request.
+   * Use `none` after logout / when a fresh upstream read is required.
+   */
+  cacheMode?: 'request' | 'none';
 }
 
 function isUpstreamTokenExpired(data: unknown): boolean {
@@ -48,6 +59,7 @@ export class EnsHttpService implements OnModuleInit {
   private readonly apiBaseUrl: string;
   private readonly defaultTimeoutMs: number;
   private readonly upstreamDebugLog: boolean;
+  private readonly perfTimingLog: boolean;
 
   constructor(
     private readonly httpService: HttpService,
@@ -60,6 +72,8 @@ export class EnsHttpService implements OnModuleInit {
       this.configService.get<number>('upstreamTimeoutMs') ?? 30000;
     this.upstreamDebugLog =
       this.configService.get<boolean>('upstreamDebugLog') ?? false;
+    this.perfTimingLog =
+      this.configService.get<boolean>('perfTimingLog') ?? false;
   }
 
   async onModuleInit(): Promise<void> {
@@ -117,17 +131,27 @@ export class EnsHttpService implements OnModuleInit {
     status: number,
     data: unknown,
     durationMs: number,
+    req?: Request,
   ): void {
-    if (!this.upstreamDebugLog && status < 400) return;
+    const isError = status >= 400;
+    if (!isError && !this.upstreamDebugLog && !this.perfTimingLog) return;
 
-    const summary = this.summarizeUpstreamBody(data);
-    const level = status >= 400 ? 'warn' : 'debug';
+    const summary = isError ? this.summarizeUpstreamBody(data) : '';
+    const route = getRequestPerfRoute(req);
+    const routePart = route ? ` route=${route}` : '';
     const line =
       `[upstream] ${method} ${this.redactUrl(url)} -> ${status} ${durationMs}ms` +
+      routePart +
       (summary ? ` | ${summary}` : '');
 
-    if (level === 'warn') {
+    if (isError) {
       this.logger.warn(line);
+      return;
+    }
+
+    // PERF_TIMING_LOG is production-safe (path/status/duration only).
+    if (this.perfTimingLog) {
+      this.logger.log(line);
     } else {
       this.logger.debug(line);
     }
@@ -180,6 +204,7 @@ export class EnsHttpService implements OnModuleInit {
         result.status,
         result.data,
         Date.now() - started,
+        options.req,
       );
       return result;
     } catch (error) {
@@ -195,6 +220,7 @@ export class EnsHttpService implements OnModuleInit {
             result.status,
             result.data,
             Date.now() - started,
+            options.req,
           );
           return result;
         }
@@ -226,27 +252,48 @@ export class EnsHttpService implements OnModuleInit {
   }
 
   async proxy(options: EnsProxyOptions): Promise<EnsHttpResult> {
-    const headers: Record<string, string> = {
-      ...(options.req ? pickForwardHeaders(options.req) : {}),
-      ...(options.headers ?? {}),
-    };
+    const method = String(options.method).toUpperCase();
+    const cacheMode =
+      options.cacheMode ?? (method === 'GET' ? 'request' : 'none');
+    const authFingerprint = authFingerprintFromRequest(
+      options.req,
+      options.headers,
+    );
+    const cacheKey = buildUpstreamCacheKey({
+      method,
+      path: options.path,
+      query: options.query,
+      authFingerprint,
+    });
 
-    await this.attachApiKey(headers);
+    return coalesceRequestUpstream(
+      options.req,
+      cacheKey,
+      cacheMode === 'request' && method === 'GET',
+      async () => {
+        const headers: Record<string, string> = {
+          ...(options.req ? pickForwardHeaders(options.req) : {}),
+          ...(options.headers ?? {}),
+        };
 
-    let result = await this.executeRequest(options, headers);
+        await this.attachApiKey(headers);
 
-    if (
-      result.status === 405 &&
-      isUpstreamTokenExpired(result.data) &&
-      this.apiKeyService.isConfigured()
-    ) {
-      this.logger.warn(
-        '[upstream] x-api-key rejected as expired — re-syncing clock and retrying once',
-      );
-      await this.attachApiKey(headers, true);
-      result = await this.executeRequest(options, headers);
-    }
+        let result = await this.executeRequest(options, headers);
 
-    return result;
+        if (
+          result.status === 405 &&
+          isUpstreamTokenExpired(result.data) &&
+          this.apiKeyService.isConfigured()
+        ) {
+          this.logger.warn(
+            '[upstream] x-api-key rejected as expired — re-syncing clock and retrying once',
+          );
+          await this.attachApiKey(headers, true);
+          result = await this.executeRequest(options, headers);
+        }
+
+        return result;
+      },
+    );
   }
 }

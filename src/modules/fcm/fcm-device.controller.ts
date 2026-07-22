@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Post,
   Put,
   Req,
   ServiceUnavailableException,
@@ -16,6 +17,16 @@ import {
 } from './dto/fcm-device.dto';
 import { FcmDeviceService } from './fcm-device.service';
 
+/**
+ * Canonical Flutter client routes:
+ *   PUT    /staff/v1/devices/fcm
+ *   PUT    /staff/v1/devices/fcm/refresh
+ *   DELETE /staff/v1/devices/fcm
+ *
+ * Compatibility aliases (same handlers; avoid 404 from older clients / probes):
+ *   POST|PUT /staff/v1/devices/fcm/register
+ *   POST     /staff/v1/devices/fcm
+ */
 @Controller('staff/v1/devices/fcm')
 export class FcmDeviceController {
   constructor(
@@ -37,6 +48,26 @@ export class FcmDeviceController {
   register(@Req() req: Request, @Body() body: RegisterFcmDeviceDto) {
     this.assertApiRole();
     return this.devices.register(req, body);
+  }
+
+  /** Compatibility: some clients POST the canonical path. */
+  @AuthThrottle()
+  @Post()
+  registerPost(@Req() req: Request, @Body() body: RegisterFcmDeviceDto) {
+    return this.register(req, body);
+  }
+
+  /** Compatibility: probes/docs that used `/register`. */
+  @AuthThrottle()
+  @Put('register')
+  registerPutAlias(@Req() req: Request, @Body() body: RegisterFcmDeviceDto) {
+    return this.register(req, body);
+  }
+
+  @AuthThrottle()
+  @Post('register')
+  registerPostAlias(@Req() req: Request, @Body() body: RegisterFcmDeviceDto) {
+    return this.register(req, body);
   }
 
   @AuthThrottle()

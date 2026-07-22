@@ -63,6 +63,7 @@ export class StaffController {
 
   @Get('auth/me')
   async me(@Req() req: Request, @Res() res: Response) {
+    // Shares request-scoped GET coalescing with resolveStaffAuth / orders flows.
     const result = await this.ensHttp.proxy({
       method: 'GET',
       path: 'staff-auth/me',
@@ -82,6 +83,7 @@ export class StaffController {
       path: 'staff-auth/logout',
       req,
       body: body ?? {},
+      cacheMode: 'none',
     });
     sendProxyResponse(res, result, this.assetUrlService);
   }

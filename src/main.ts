@@ -48,6 +48,7 @@ async function bootstrap() {
     configService.get<string>('requestUrlencodedLimit') ?? '1mb';
   const trustProxyHops = configService.get<number>('trustProxyHops') ?? 0;
   const upstreamDebug = configService.get<boolean>('upstreamDebugLog');
+  const perfTiming = configService.get<boolean>('perfTimingLog');
   const processRole = configService.get<string>('processRole') ?? 'api';
 
   app.enableShutdownHooks();
@@ -104,6 +105,12 @@ async function bootstrap() {
   if (upstreamDebug) {
     Logger.log(
       'Upstream debug logging enabled (UPSTREAM_DEBUG_LOG)',
+      'Bootstrap',
+    );
+  }
+  if (perfTiming) {
+    Logger.log(
+      'Performance timing logs enabled (PERF_TIMING_LOG)',
       'Bootstrap',
     );
   }

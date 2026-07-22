@@ -89,9 +89,20 @@ export function availableActionsForOrder(
     });
   };
 
-  // Standalone service requests: Accept / Reject only while pending.
+  // Standalone service requests while pending.
+  // Waiter ping: single Done (confirm clears the call from the floor).
+  // Orphan bill: keep Accept / Reject.
   if (isService && channel === 'table') {
     if (status !== 'pending') {
+      return specs;
+    }
+    if (requestKind === 'waiter') {
+      if (staffHasPermission(auth, 'orders:confirm')) {
+        push('TABLE_CALL_CONFIRMED', {
+          en: 'Done',
+          ar: 'تمت التلبية',
+        });
+      }
       return specs;
     }
     if (staffHasPermission(auth, 'orders:confirm')) {

@@ -135,17 +135,15 @@ describe('availableActionsForOrder (Web table parity)', () => {
     );
   });
 
-  it('service waiter pending offers Accept/Reject only', () => {
+  it('service waiter pending offers Done (confirm) only', () => {
     const actions = availableActionsForOrder(
       'pending',
       cashierAuth(),
       'table',
       { requestKind: 'waiter' },
     );
-    expect(actions.map((a) => a.action)).toEqual([
-      'TABLE_CALL_CONFIRMED',
-      'TABLE_CALL_CANCELLED',
-    ]);
+    expect(actions.map((a) => a.action)).toEqual(['TABLE_CALL_CONFIRMED']);
+    expect(actions[0]?.label).toEqual({ en: 'Done', ar: 'تمت التلبية' });
   });
 
   it('service waiter confirmed exposes no Finish/Prepare/Deliver', () => {

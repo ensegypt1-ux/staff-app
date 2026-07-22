@@ -141,6 +141,10 @@ describe('StaffOrdersFlowService table activity-logs soft-404 fallback', () => {
     expect(
       entries.every((e) => Array.isArray(e.availableActions)),
     ).toBe(true);
+    const pendingListCalls = ensHttp.proxy.mock.calls.filter(
+      (call) => call[0]?.path === 'staff-auth/table-calls',
+    );
+    expect(pendingListCalls.length).toBe(1);
   });
 
   it('does not fall back when activity-logs succeeds (cashier path)', async () => {
