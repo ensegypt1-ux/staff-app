@@ -1,1 +1,0 @@
-{"version":3,"file":"auth-identity.js","sourceRoot":"","sources":["../../../src/common/types/auth-identity.ts"],"names":[],"mappings":";;;AAgBA,kCAMC;AARY,QAAA,iBAAiB,GAAG,cAAuB,CAAC;AAEzD,SAAgB,WAAW,CAAC,IAA+B;IACzD,OAAO,CACL,MAAM,CAAC,IAAI,IAAI,EAAE,CAAC;SACf,IAAI,EAAE;SACN,WAAW,EAAE,KAAK,OAAO,CAC7B,CAAC;AACJ,CAAC"}

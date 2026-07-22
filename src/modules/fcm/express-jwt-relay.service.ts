@@ -32,6 +32,8 @@ export class ExpressJwtRelayService {
     };
 
     // Match Express generateStaffAccessToken (no exp).
+    // Security note: short-lived exp requires coordinated Express change — do not
+    // add expiresIn here until Express staff JWT verification accepts it.
     return jwt.sign(payload, secret, { algorithm: 'HS256' });
   }
 }

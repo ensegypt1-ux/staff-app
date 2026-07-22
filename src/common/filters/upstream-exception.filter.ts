@@ -50,13 +50,22 @@ export class UpstreamExceptionFilter implements ExceptionFilter {
     }
 
     const record = payload as Record<string, unknown>;
+    const error =
+      typeof record.error === 'string'
+        ? record.error
+        : typeof record.message === 'string'
+          ? record.message
+          : Array.isArray(record.message)
+            ? 'Validation failed'
+            : 'Request failed';
+
     return {
-      statusCode: record.statusCode ?? statusCode,
-      error: record.error ?? record.message,
-      errorAr: record.errorAr,
-      code: record.code,
+      statusCode:
+        typeof record.statusCode === 'number' ? record.statusCode : statusCode,
+      error,
+      errorAr: typeof record.errorAr === 'string' ? record.errorAr : undefined,
+      code: typeof record.code === 'string' ? record.code : undefined,
       requestId,
-      ...record,
     };
   }
 }

@@ -21,6 +21,7 @@ import {
 } from '../../common/utils/proxy-response.util';
 import { EnsHttpService } from '../../infrastructure/ens-backend/ens-http.service';
 import { AssetUrlService } from '../../infrastructure/storage/asset-url.service';
+import { StaffLoginDto, StaffLogoutDto } from './dto/staff-auth.dto';
 import { StaffOrdersFlowService } from './staff-orders-flow.service';
 import { StaffPresentedListResult } from './staff-order-presenter.service';
 
@@ -49,7 +50,7 @@ export class StaffController {
   async login(
     @Req() req: Request,
     @Res() res: Response,
-    @Body() body: unknown,
+    @Body() body: StaffLoginDto,
   ) {
     const result = await this.ensHttp.proxy({
       method: 'POST',
@@ -74,7 +75,7 @@ export class StaffController {
   async logout(
     @Req() req: Request,
     @Res() res: Response,
-    @Body() body: unknown,
+    @Body() body: StaffLogoutDto,
   ) {
     const result = await this.ensHttp.proxy({
       method: 'POST',

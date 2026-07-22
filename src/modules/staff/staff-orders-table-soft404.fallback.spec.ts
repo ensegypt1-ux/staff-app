@@ -1,6 +1,5 @@
 import { StaffOrdersFlowService } from './staff-orders-flow.service';
 import { StaffOrderPresenterService } from './staff-order-presenter.service';
-import { StaffTableOrderCreatorRegistry } from './staff-table-order-creator.registry';
 import { EnsHttpService } from '../../infrastructure/ens-backend/ens-http.service';
 import { waiterAuth, cashierAuth } from './staff-auth.fixtures';
 import { Request } from 'express';
@@ -23,7 +22,6 @@ describe('StaffOrdersFlowService table activity-logs soft-404 fallback', () => {
     service = new StaffOrdersFlowService(
       ensHttp as unknown as EnsHttpService,
       presenter,
-      new StaffTableOrderCreatorRegistry(),
     );
 
     jest

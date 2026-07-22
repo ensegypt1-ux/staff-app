@@ -1,1 +1,0 @@
-{"version":3,"file":"staff.module.js","sourceRoot":"","sources":["../../../src/modules/staff/staff.module.ts"],"names":[],"mappings":";;;;;;;;;AAAA,2CAAwC;AACxC,yDAAqD;AACrD,2DAAsD;AAM/C,IAAM,WAAW,GAAjB,MAAM,WAAW;CAAG,CAAA;AAAd,kCAAW;sBAAX,WAAW;IAJvB,IAAA,eAAM,EAAC;QACN,OAAO,EAAE,CAAC,mCAAe,CAAC;QAC1B,WAAW,EAAE,CAAC,kCAAe,CAAC;KAC/B,CAAC;GACW,WAAW,CAAG"}

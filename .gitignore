@@ -1,6 +1,9 @@
 .env
 .env.*
 !.env.example
-README.md
-node_modules
-docs
+node_modules/
+dist/
+coverage/
+*.log
+data/
+.DS_Store

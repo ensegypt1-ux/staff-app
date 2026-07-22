@@ -69,7 +69,6 @@ import {
   parsePublicMenuTablesPayload,
   parseStaffCallCreateId,
 } from './staff-table-order.util';
-import { StaffTableOrderCreatorRegistry } from './staff-table-order-creator.registry';
 import { getAuthIdentity } from '../../common/utils/jwt-payload.util';
 import { terminalAtSortMs } from './staff-order-terminal-at.util';
 
@@ -94,7 +93,6 @@ export class StaffOrdersFlowService {
   constructor(
     private readonly ensHttp: EnsHttpService,
     private readonly presenter: StaffOrderPresenterService,
-    private readonly tableOrderCreators: StaffTableOrderCreatorRegistry,
   ) {}
 
   /**

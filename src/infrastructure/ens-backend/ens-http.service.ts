@@ -86,21 +86,28 @@ export class EnsHttpService implements OnModuleInit {
     return url.toString();
   }
 
+  /** Safe upstream error summary — never dumps full bodies or tokens. */
   private summarizeUpstreamBody(data: unknown): string {
     if (!data || typeof data !== 'object') {
-      return typeof data === 'string' ? data.slice(0, 200) : '';
+      return '';
     }
     const body = data as Record<string, unknown>;
     const parts: string[] = [];
-    if (body.code != null) parts.push(`code=${String(body.code)}`);
-    if (body.error != null) parts.push(`error=${String(body.error)}`);
-    if (body.errorAr != null) parts.push(`errorAr=${String(body.errorAr)}`);
-    if (parts.length > 0) return parts.join(' ');
+    if (body.code != null) {
+      parts.push(`code=${String(body.code).slice(0, 64)}`);
+    }
+    if (body.error != null) {
+      parts.push(`error=${String(body.error).slice(0, 120)}`);
+    }
+    return parts.join(' ');
+  }
+
+  private redactUrl(url: string): string {
     try {
-      const json = JSON.stringify(data);
-      return json.length > 300 ? `${json.slice(0, 300)}...` : json;
+      const parsed = new URL(url);
+      return `${parsed.origin}${parsed.pathname}`;
     } catch {
-      return '';
+      return '[upstream]';
     }
   }
 
@@ -116,7 +123,7 @@ export class EnsHttpService implements OnModuleInit {
     const summary = this.summarizeUpstreamBody(data);
     const level = status >= 400 ? 'warn' : 'debug';
     const line =
-      `[upstream] ${method} ${url} -> ${status} ${durationMs}ms` +
+      `[upstream] ${method} ${this.redactUrl(url)} -> ${status} ${durationMs}ms` +
       (summary ? ` | ${summary}` : '');
 
     if (level === 'warn') {
@@ -193,7 +200,7 @@ export class EnsHttpService implements OnModuleInit {
         }
         if (error.code === 'ECONNABORTED') {
           this.logger.warn(
-            `[upstream] ${options.method} ${url} -> timeout after ${Date.now() - started}ms`,
+            `[upstream] ${options.method} ${this.redactUrl(url)} -> timeout after ${Date.now() - started}ms`,
           );
           return {
             status: 504,
@@ -207,7 +214,7 @@ export class EnsHttpService implements OnModuleInit {
       }
 
       this.logger.error(
-        `[upstream] ${options.method} ${url} -> unavailable (${error instanceof Error ? error.message : String(error)})`,
+        `[upstream] ${options.method} ${this.redactUrl(url)} -> unavailable (${error instanceof Error ? error.message : String(error)})`,
       );
 
       throw new ServiceUnavailableException({

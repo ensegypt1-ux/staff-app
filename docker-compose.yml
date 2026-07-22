@@ -7,7 +7,7 @@ services:
     container_name: staff-bff-postgres
     restart: unless-stopped
     ports:
-      - "55433:5432"
+      - "127.0.0.1:55433:5432"
     environment:
       POSTGRES_USER: staff_bff
       POSTGRES_PASSWORD: staff_bff_dev

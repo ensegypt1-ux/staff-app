@@ -30,6 +30,7 @@ export class FcmHealthController {
     const uncoveredSinceLimit =
       this.config.get<number>('fcmUncoveredReadyMs') ?? 180_000;
 
+    // Do not expose menu ID lists publicly — counts only for readiness.
     const body = {
       enabled,
       role: this.config.get<string>('processRole'),
@@ -37,7 +38,7 @@ export class FcmHealthController {
       dryRun: this.config.get<boolean>('fcmDryRun') === true,
       desiredMenus: this.supervisor.desiredMenus,
       joinedMenus: this.supervisor.joinedMenus,
-      uncoveredMenus: uncovered,
+      uncoveredCount: uncovered.length,
       reconnectsTotal: this.supervisor.reconnectsTotal,
       pushSentTotal: this.sender.sentTotal,
       pushDedupedTotal: this.sender.dedupedTotal,

@@ -38,6 +38,8 @@ export class EnvironmentVariables {
   @IsString()
   JWT_ACCESS_SECRET?: string;
 
+  /** When true, logs upstream method/path/status (never full bodies). Forbidden in production. */
+
   @IsOptional()
   @IsInt()
   @Min(-120)
@@ -182,6 +184,19 @@ export function validateEnv(config: Record<string, unknown>) {
     if (role === 'all') {
       productionIssues.push(
         'PROCESS_ROLE=all is not allowed in production; use api and worker separately',
+      );
+    }
+
+    if (isTruthy(validated.UPSTREAM_DEBUG_LOG)) {
+      productionIssues.push(
+        'UPSTREAM_DEBUG_LOG=true is forbidden in production',
+      );
+    }
+
+    const secret = validated.SECRET_KEY?.trim() ?? '';
+    if (secret.length < 32) {
+      productionIssues.push(
+        'SECRET_KEY must be at least 32 characters in production',
       );
     }
   }
