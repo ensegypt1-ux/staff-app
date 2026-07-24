@@ -35,18 +35,42 @@ export function todayIsoDateLocal(): string {
   return formatIsoDateLocal(new Date());
 }
 
-/**
- * Table history defaults to today when no range is supplied.
- */
-export function resolveTableHistoryDateRange(
-  query: Record<string, unknown>,
-  scope: 'active' | 'history',
-  channel: StaffOrderChannel,
-): TableHistoryDateRange | null {
-  if (scope !== 'history' || channel !== 'table') {
-    return null;
-  }
+/** Default venue calendar TZ until menus expose their own. */
+export const STAFF_VENUE_TIMEZONE_DEFAULT = 'Asia/Riyadh';
 
+export function resolveStaffVenueTimeZone(): string {
+  const raw = process.env.STAFF_VENUE_TIMEZONE;
+  if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  return STAFF_VENUE_TIMEZONE_DEFAULT;
+}
+
+/** YYYY-MM-DD for "now" in an IANA timezone (venue calendar day). */
+export function todayIsoDateInTimeZone(timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === 'year')?.value;
+    const m = parts.find((p) => p.type === 'month')?.value;
+    const d = parts.find((p) => p.type === 'day')?.value;
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch {
+    // Invalid TZ → fall through to host local.
+  }
+  return todayIsoDateLocal();
+}
+
+export function venueTodayIsoDate(): string {
+  return todayIsoDateInTimeZone(resolveStaffVenueTimeZone());
+}
+
+function resolveHistoryDateRangeFromQuery(
+  query: Record<string, unknown>,
+  todayIso: string,
+): TableHistoryDateRange {
   const from = parseIsoDateParam(query.dateFrom);
   const to = parseIsoDateParam(query.dateTo);
 
@@ -65,9 +89,39 @@ export function resolveTableHistoryDateRange(
     return { dateFrom: to, dateTo: to };
   }
 
-  const today = todayIsoDateLocal();
-  return { dateFrom: today, dateTo: today };
+  return { dateFrom: todayIso, dateTo: todayIso };
 }
+
+/**
+ * Table history defaults to today when no range is supplied.
+ */
+export function resolveTableHistoryDateRange(
+  query: Record<string, unknown>,
+  scope: 'active' | 'history',
+  channel: StaffOrderChannel,
+): TableHistoryDateRange | null {
+  if (scope !== 'history' || channel !== 'table') {
+    return null;
+  }
+
+  return resolveHistoryDateRangeFromQuery(query, todayIsoDateLocal());
+}
+
+/**
+ * Unified History (channel=all) always has an explicit date window.
+ * Defaults to venue-today when the client omits dates.
+ */
+export function resolveUnifiedHistoryDateRange(
+  query: Record<string, unknown>,
+): TableHistoryDateRange {
+  return resolveHistoryDateRangeFromQuery(query, venueTodayIsoDate());
+}
+
+/**
+ * Max Express pages (limit 100) per channel when collecting a date-scoped
+ * unified history window. Hitting this with more pages remaining → explicit error.
+ */
+export const UNIFIED_HISTORY_MAX_SCAN_PAGES = 50;
 
 export function entryCreatedAtIsoDate(
   entry: StaffPresentedOrderEntry,

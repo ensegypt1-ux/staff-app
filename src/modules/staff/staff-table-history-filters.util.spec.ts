@@ -4,6 +4,9 @@ import {
   paginatePresentedEntries,
   parseIsoDateParam,
   resolveTableHistoryDateRange,
+  resolveUnifiedHistoryDateRange,
+  todayIsoDateInTimeZone,
+  venueTodayIsoDate,
 } from './staff-table-history-filters.util';
 import { StaffPresentedOrderEntry } from './staff-order-presenter.service';
 
@@ -56,19 +59,41 @@ describe('staff-table-history-filters.util', () => {
   });
 
   it('resolveTableHistoryDateRange defaults to today for table history', () => {
-    const range = resolveTableHistoryDateRange(
-      {},
-      'history',
-      'table',
-    );
+    const range = resolveTableHistoryDateRange({}, 'history', 'table');
     expect(range).not.toBeNull();
     expect(range!.dateFrom).toBe(range!.dateTo);
   });
 
   it('resolveTableHistoryDateRange returns null for active', () => {
+    expect(resolveTableHistoryDateRange({}, 'active', 'table')).toBeNull();
+  });
+
+  it('resolveUnifiedHistoryDateRange defaults to venue today', () => {
+    const range = resolveUnifiedHistoryDateRange({});
+    expect(range.dateFrom).toBe(range.dateTo);
+    expect(range.dateFrom).toBe(venueTodayIsoDate());
+  });
+
+  it('resolveUnifiedHistoryDateRange honors explicit range', () => {
     expect(
-      resolveTableHistoryDateRange({}, 'active', 'table'),
-    ).toBeNull();
+      resolveUnifiedHistoryDateRange({
+        dateFrom: '2026-07-01',
+        dateTo: '2026-07-07',
+      }),
+    ).toEqual({ dateFrom: '2026-07-01', dateTo: '2026-07-07' });
+  });
+
+  it('resolveUnifiedHistoryDateRange swaps inverted range', () => {
+    expect(
+      resolveUnifiedHistoryDateRange({
+        dateFrom: '2026-07-10',
+        dateTo: '2026-07-01',
+      }),
+    ).toEqual({ dateFrom: '2026-07-01', dateTo: '2026-07-10' });
+  });
+
+  it('todayIsoDateInTimeZone returns YYYY-MM-DD for Asia/Riyadh', () => {
+    expect(todayIsoDateInTimeZone('Asia/Riyadh')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   it('filterEntriesByDateRange keeps entries in range', () => {
@@ -81,22 +106,20 @@ describe('staff-table-history-filters.util', () => {
       dateFrom: '2026-07-02',
       dateTo: '2026-07-02',
     });
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0]!.staffCallId).toBe(2);
+    expect(filtered.map((e) => e.staffCallId)).toEqual([2]);
+  });
+
+  it('paginatePresentedEntries slices correctly', () => {
+    const entries = Array.from({ length: 5 }, (_, i) =>
+      mockEntry({ staffCallId: i + 1 }),
+    );
+    const page = paginatePresentedEntries(entries, 2, 2);
+    expect(page.total).toBe(5);
+    expect(page.totalPages).toBe(3);
+    expect(page.entries.map((e) => e.staffCallId)).toEqual([3, 4]);
   });
 
   it('entryCreatedAtIsoDate parses ISO timestamps', () => {
     expect(entryCreatedAtIsoDate(mockEntry())).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-  });
-
-  it('paginatePresentedEntries slices correctly', () => {
-    const entries = [1, 2, 3, 4, 5].map((id) =>
-      mockEntry({ staffCallId: id }),
-    );
-    const page = paginatePresentedEntries(entries, 2, 2);
-    expect(page.entries).toHaveLength(2);
-    expect(page.total).toBe(5);
-    expect(page.totalPages).toBe(3);
-    expect(page.entries[0]!.staffCallId).toBe(3);
   });
 });

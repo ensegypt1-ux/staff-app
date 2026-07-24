@@ -63,7 +63,9 @@ import {
   buildTableHistoryListResult,
   filterEntriesByDateRange,
   resolveTableHistoryDateRange,
+  resolveUnifiedHistoryDateRange,
   TABLE_HISTORY_MAX_SCAN_ROWS,
+  UNIFIED_HISTORY_MAX_SCAN_PAGES,
 } from './staff-table-history-filters.util';
 import {
   parsePublicMenuTablesPayload,
@@ -74,7 +76,7 @@ import { terminalAtSortMs } from './staff-order-terminal-at.util';
 
 type Scope = 'active' | 'history';
 
-/** Max upstream pages to scan when age-filtering post-fetch. */
+/** Max upstream pages to scan when age-filtering post-fetch (active grace only). */
 const ARCHIVE_SCOPE_MAX_SCAN_PAGES = 15;
 /** Pages of delivered/cancelled to scan for operational grace (page 1). */
 const OPERATIONAL_GRACE_SCAN_PAGES = 3;
@@ -2735,23 +2737,51 @@ export class StaffOrdersFlowService {
     if (canStaffViewOrders(auth)) channels.push('table');
     if (canStaffViewDelivery(auth)) channels.push('delivery');
 
+    const dateRange = resolveUnifiedHistoryDateRange(query);
+    const scopedQuery: Record<string, unknown> = {
+      ...query,
+      dateFrom: dateRange.dateFrom,
+      dateTo: dateRange.dateTo,
+    };
+
     if (channels.length === 0) {
       return {
         status: 200,
-        data: this.emptyList(auth, 'all', 'history', page, limit),
+        data: {
+          ...this.emptyList(auth, 'all', 'history', page, limit),
+          filters: {
+            dateFrom: dateRange.dateFrom,
+            dateTo: dateRange.dateTo,
+          },
+        },
       };
     }
 
     const collected: StaffPresentedOrderEntry[] = [];
     for (const channel of channels) {
-      const channelEntries = await this.scanArchiveEntriesForChannel(
+      const channelResult = await this.collectDateScopedHistoryForChannel(
         req,
         menuId,
         auth,
         channel,
-        query,
+        scopedQuery,
       );
-      collected.push(...channelEntries);
+      if (channelResult.truncated) {
+        return {
+          status: 400,
+          data: {
+            error:
+              'History date range is too large. Narrow the dates and try again.',
+            errorAr: 'نطاق التاريخ كبير جداً. قلّص التواريخ وحاول مجدداً.',
+            code: 'HISTORY_RANGE_TOO_LARGE',
+            filters: {
+              dateFrom: dateRange.dateFrom,
+              dateTo: dateRange.dateTo,
+            },
+          },
+        };
+      }
+      collected.push(...channelResult.entries);
     }
 
     const deduped = this.dedupeEntriesByStaffCallId(collected);
@@ -2771,6 +2801,7 @@ export class StaffOrdersFlowService {
     });
 
     const total = deduped.length;
+    const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
     const slice = deduped.slice((page - 1) * limit, page * limit);
     const entries = this.presenter.applyListScopeToEntries(slice, 'history');
     const enriched = await this.enrichEntriesForStaff(
@@ -2793,24 +2824,38 @@ export class StaffOrdersFlowService {
         total,
         page,
         limit,
-        totalPages: Math.max(1, Math.ceil(total / limit) || 1),
+        totalPages,
         pendingCount: 0,
         capabilities: this.presenter.capabilitiesFor(auth),
+        filters: {
+          dateFrom: dateRange.dateFrom,
+          dateTo: dateRange.dateTo,
+        },
       },
     };
   }
 
-  private async scanArchiveEntriesForChannel(
+  /**
+   * Date-scoped unified History collector: pages Express for one channel until
+   * the filtered window is exhausted. Does not apply the 24h archive grace gate
+   * (today's terminal orders appear immediately). Never silently truncates —
+   * returns truncated=true when the safety page cap is hit with more remaining.
+   */
+  private async collectDateScopedHistoryForChannel(
     req: Request,
     menuId: number,
     auth: StaffResolvedAuth,
     channel: StaffOrderChannel,
     query: Record<string, unknown>,
-  ): Promise<StaffPresentedOrderEntry[]> {
+  ): Promise<{ entries: StaffPresentedOrderEntry[]; truncated: boolean }> {
     const matched: StaffPresentedOrderEntry[] = [];
-    const scanLimit = 50;
+    const scanLimit = 100;
 
-    for (let page = 1; page <= ARCHIVE_SCOPE_MAX_SCAN_PAGES; page += 1) {
+    for (
+      let page = 1;
+      page <= UNIFIED_HISTORY_MAX_SCAN_PAGES;
+      page += 1
+    ) {
       const upstream = await this.ensHttp.proxy({
         method: 'GET',
         path: `menus/${menuId}/activity-logs`,
@@ -2822,14 +2867,18 @@ export class StaffOrdersFlowService {
           ...this.deliveryListQueryParams(query),
         },
       });
-      if (upstream.status >= 400) break;
+      if (upstream.status >= 400) {
+        break;
+      }
       const payload = (upstream.data ?? {}) as Record<string, unknown>;
       const rows = Array.isArray(payload.entries)
         ? payload.entries
         : Array.isArray(payload.calls)
           ? payload.calls
           : [];
-      if (rows.length === 0) break;
+      if (rows.length === 0) {
+        return { entries: matched, truncated: false };
+      }
 
       let presented = rows
         .map((row) =>
@@ -2854,12 +2903,17 @@ export class StaffOrdersFlowService {
         presented,
         channel === 'delivery' ? 'delivery' : undefined,
       );
-      matched.push(...this.presenter.filterByScope(presented, 'history'));
+      // Terminal only — no 24h isArchivedVisible gate for date-scoped History.
+      matched.push(
+        ...presented.filter((entry) => isHistoryStaffOrderStatus(entry.status)),
+      );
 
       const totalPages = Number(payload.totalPages ?? 1) || 1;
-      if (page >= totalPages) break;
+      if (page >= totalPages) {
+        return { entries: matched, truncated: false };
+      }
     }
 
-    return matched;
+    return { entries: matched, truncated: true };
   }
 }
