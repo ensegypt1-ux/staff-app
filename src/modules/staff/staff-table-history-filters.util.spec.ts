@@ -1,11 +1,17 @@
 import {
   entryCreatedAtIsoDate,
   filterEntriesByDateRange,
+  inclusiveHistoryDayCount,
+  isUnifiedHistoryDateRangeAllowed,
   paginatePresentedEntries,
   parseIsoDateParam,
+  resolveChannelHistoryDateRange,
   resolveTableHistoryDateRange,
   resolveUnifiedHistoryDateRange,
+  resolveUnifiedHistoryMaxRangeDays,
   todayIsoDateInTimeZone,
+  UNIFIED_HISTORY_MAX_RANGE_DAYS_DEFAULT,
+  unifiedHistoryPeriodTooLargeMessage,
   venueTodayIsoDate,
 } from './staff-table-history-filters.util';
 import { StaffPresentedOrderEntry } from './staff-order-presenter.service';
@@ -53,6 +59,16 @@ function mockEntry(
 }
 
 describe('staff-table-history-filters.util', () => {
+  const prevEnv = process.env.STAFF_HISTORY_MAX_RANGE_DAYS;
+
+  afterEach(() => {
+    if (prevEnv === undefined) {
+      delete process.env.STAFF_HISTORY_MAX_RANGE_DAYS;
+    } else {
+      process.env.STAFF_HISTORY_MAX_RANGE_DAYS = prevEnv;
+    }
+  });
+
   it('parseIsoDateParam accepts YYYY-MM-DD', () => {
     expect(parseIsoDateParam('2026-07-02')).toBe('2026-07-02');
     expect(parseIsoDateParam('bad')).toBeNull();
@@ -66,6 +82,19 @@ describe('staff-table-history-filters.util', () => {
 
   it('resolveTableHistoryDateRange returns null for active', () => {
     expect(resolveTableHistoryDateRange({}, 'active', 'table')).toBeNull();
+  });
+
+  it('resolveChannelHistoryDateRange defaults for delivery history', () => {
+    const range = resolveChannelHistoryDateRange({}, 'history', 'delivery');
+    expect(range).not.toBeNull();
+    expect(range!.dateFrom).toBe(range!.dateTo);
+    expect(range!.dateFrom).toBe(venueTodayIsoDate());
+  });
+
+  it('resolveChannelHistoryDateRange returns null for active', () => {
+    expect(
+      resolveChannelHistoryDateRange({}, 'active', 'table'),
+    ).toBeNull();
   });
 
   it('resolveUnifiedHistoryDateRange defaults to venue today', () => {
@@ -94,6 +123,42 @@ describe('staff-table-history-filters.util', () => {
 
   it('todayIsoDateInTimeZone returns YYYY-MM-DD for Asia/Riyadh', () => {
     expect(todayIsoDateInTimeZone('Asia/Riyadh')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('inclusiveHistoryDayCount counts inclusive days', () => {
+    expect(inclusiveHistoryDayCount('2026-07-18', '2026-07-24')).toBe(7);
+    expect(inclusiveHistoryDayCount('2026-07-24', '2026-07-24')).toBe(1);
+  });
+
+  it('resolveUnifiedHistoryMaxRangeDays defaults to 30 and respects env', () => {
+    delete process.env.STAFF_HISTORY_MAX_RANGE_DAYS;
+    expect(resolveUnifiedHistoryMaxRangeDays()).toBe(
+      UNIFIED_HISTORY_MAX_RANGE_DAYS_DEFAULT,
+    );
+    process.env.STAFF_HISTORY_MAX_RANGE_DAYS = '7';
+    expect(resolveUnifiedHistoryMaxRangeDays()).toBe(7);
+  });
+
+  it('isUnifiedHistoryDateRangeAllowed enforces max days', () => {
+    expect(
+      isUnifiedHistoryDateRangeAllowed(
+        { dateFrom: '2026-06-25', dateTo: '2026-07-24' },
+        30,
+      ),
+    ).toBe(true);
+    expect(
+      isUnifiedHistoryDateRangeAllowed(
+        { dateFrom: '2026-06-24', dateTo: '2026-07-24' },
+        30,
+      ),
+    ).toBe(false);
+  });
+
+  it('unifiedHistoryPeriodTooLargeMessage is staff-friendly', () => {
+    expect(unifiedHistoryPeriodTooLargeMessage('en')).toContain(
+      'shorter date range',
+    );
+    expect(unifiedHistoryPeriodTooLargeMessage('ar')).toContain('نطاقاً');
   });
 
   it('filterEntriesByDateRange keeps entries in range', () => {

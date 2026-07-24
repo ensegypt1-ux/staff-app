@@ -62,10 +62,14 @@ import {
 import {
   buildTableHistoryListResult,
   filterEntriesByDateRange,
+  isUnifiedHistoryDateRangeAllowed,
+  resolveChannelHistoryDateRange,
   resolveTableHistoryDateRange,
   resolveUnifiedHistoryDateRange,
+  resolveUnifiedHistoryMaxRangeDays,
   TABLE_HISTORY_MAX_SCAN_ROWS,
   UNIFIED_HISTORY_MAX_SCAN_PAGES,
+  unifiedHistoryPeriodTooLargeMessage,
 } from './staff-table-history-filters.util';
 import {
   parsePublicMenuTablesPayload,
@@ -1282,11 +1286,23 @@ export class StaffOrdersFlowService {
       };
     }
 
+    const dateRange =
+      scope === 'history'
+        ? resolveChannelHistoryDateRange(query, 'history', channel)
+        : null;
     const upstreamQuery: Record<string, unknown> = {
       page,
       limit,
       channel: 'table',
-      ...this.deliveryListQueryParams(query),
+      ...this.deliveryListQueryParams(
+        dateRange
+          ? {
+              ...query,
+              dateFrom: dateRange.dateFrom,
+              dateTo: dateRange.dateTo,
+            }
+          : query,
+      ),
     };
 
     const upstream = await this.ensHttp.proxy({
@@ -1360,16 +1376,52 @@ export class StaffOrdersFlowService {
       presented,
     );
 
+    // History: thin Express proxy — no 24h grace filter, trust SQL totals.
+    if (scope === 'history') {
+      const entries = this.presenter.applyListScopeToEntries(
+        presented,
+        'history',
+      );
+      const enriched = await this.enrichEntriesForStaff(
+        req,
+        menuId,
+        auth,
+        entries,
+      );
+      const total = Number(payload.total ?? 0) || 0;
+      const totalPages =
+        Number(payload.totalPages ?? 0) ||
+        (total > 0 ? Math.ceil(total / limit) : 0);
+
+      return {
+        status: 200,
+        data: {
+          staffJobRole: auth.staffJobRole,
+          permissions: auth.permissions,
+          roleName: auth.roleName,
+          roleId: auth.roleId,
+          channel,
+          scope,
+          entries: enriched,
+          total,
+          page,
+          limit,
+          totalPages,
+          pendingCount,
+          capabilities: this.presenter.capabilitiesFor(auth),
+          filters: dateRange
+            ? { dateFrom: dateRange.dateFrom, dateTo: dateRange.dateTo }
+            : undefined,
+        },
+      };
+    }
+
     let entries = this.presenter.filterByScope(presented, scope);
     entries = await this.enrichEntriesForStaff(req, menuId, auth, entries);
 
     let mergedServiceCount = 0;
     // Prepend service rows on page 1 only so later pages do not repeat them.
-    if (
-      page === 1 &&
-      scope !== 'history' &&
-      this.shouldMergeServiceTableCalls(query)
-    ) {
+    if (page === 1 && this.shouldMergeServiceTableCalls(query)) {
       const merged = await this.mergeServiceRequestsFromTableCalls(
         req,
         auth,
@@ -1381,7 +1433,7 @@ export class StaffOrdersFlowService {
       mergedServiceCount = merged.addedCount;
     }
 
-    if (scope === 'active' && page === 1) {
+    if (page === 1) {
       const grace = await this.fetchOperationalGraceEntries(
         req,
         menuId,
@@ -1722,11 +1774,23 @@ export class StaffOrdersFlowService {
       };
     }
 
+    const dateRange =
+      scope === 'history'
+        ? resolveChannelHistoryDateRange(query, 'history', channel)
+        : null;
     const upstreamQuery: Record<string, unknown> = {
       page,
       limit,
       channel,
-      ...this.deliveryListQueryParams(query),
+      ...this.deliveryListQueryParams(
+        dateRange
+          ? {
+              ...query,
+              dateFrom: dateRange.dateFrom,
+              dateTo: dateRange.dateTo,
+            }
+          : query,
+      ),
     };
 
     const upstream = await this.ensHttp.proxy({
@@ -1775,6 +1839,47 @@ export class StaffOrdersFlowService {
       presented,
       'delivery',
     );
+
+    // History: thin Express proxy — no 24h grace filter, trust SQL totals.
+    if (scope === 'history') {
+      const entries = this.presenter.applyListScopeToEntries(
+        presented,
+        'history',
+      );
+      const enriched = await this.enrichEntriesForStaff(
+        req,
+        menuId,
+        auth,
+        entries,
+      );
+      const total = Number(payload.total ?? 0) || 0;
+      const totalPages =
+        Number(payload.totalPages ?? 0) ||
+        (total > 0 ? Math.ceil(total / limit) : 0);
+      const pendingCount = await this.resolveDeliveryPendingCount(req, menuId);
+
+      return {
+        status: 200,
+        data: {
+          staffJobRole: auth.staffJobRole,
+          permissions: auth.permissions,
+          roleName: auth.roleName,
+          roleId: auth.roleId,
+          channel,
+          scope,
+          entries: enriched,
+          total,
+          page,
+          limit,
+          totalPages,
+          pendingCount,
+          capabilities: this.presenter.capabilitiesFor(auth),
+          filters: dateRange
+            ? { dateFrom: dateRange.dateFrom, dateTo: dateRange.dateTo }
+            : undefined,
+        },
+      };
+    }
 
     const collectedSeed = this.presenter.filterByScope(presented, scope);
     let entries = await this.enrichEntriesForStaff(
@@ -2733,16 +2838,33 @@ export class StaffOrdersFlowService {
       };
     }
 
-    const channels: StaffOrderChannel[] = [];
-    if (canStaffViewOrders(auth)) channels.push('table');
-    if (canStaffViewDelivery(auth)) channels.push('delivery');
-
     const dateRange = resolveUnifiedHistoryDateRange(query);
+    const maxRangeDays = resolveUnifiedHistoryMaxRangeDays();
+    if (!isUnifiedHistoryDateRangeAllowed(dateRange, maxRangeDays)) {
+      return {
+        status: 400,
+        data: {
+          error: unifiedHistoryPeriodTooLargeMessage('en'),
+          errorAr: unifiedHistoryPeriodTooLargeMessage('ar'),
+          code: 'HISTORY_DATE_RANGE_EXCEEDED',
+          maxRangeDays,
+          filters: {
+            dateFrom: dateRange.dateFrom,
+            dateTo: dateRange.dateTo,
+          },
+        },
+      };
+    }
+
     const scopedQuery: Record<string, unknown> = {
       ...query,
       dateFrom: dateRange.dateFrom,
       dateTo: dateRange.dateTo,
     };
+
+    const channels: StaffOrderChannel[] = [];
+    if (canStaffViewOrders(auth)) channels.push('table');
+    if (canStaffViewDelivery(auth)) channels.push('delivery');
 
     if (channels.length === 0) {
       return {
@@ -2770,9 +2892,8 @@ export class StaffOrdersFlowService {
         return {
           status: 400,
           data: {
-            error:
-              'History date range is too large. Narrow the dates and try again.',
-            errorAr: 'نطاق التاريخ كبير جداً. قلّص التواريخ وحاول مجدداً.',
+            error: unifiedHistoryPeriodTooLargeMessage('en'),
+            errorAr: unifiedHistoryPeriodTooLargeMessage('ar'),
             code: 'HISTORY_RANGE_TOO_LARGE',
             filters: {
               dateFrom: dateRange.dateFrom,

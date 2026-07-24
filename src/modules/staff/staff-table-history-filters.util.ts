@@ -108,6 +108,20 @@ export function resolveTableHistoryDateRange(
 }
 
 /**
+ * Per-channel History (table|delivery) always has an explicit date window.
+ * Defaults to venue-today when the client omits dates.
+ */
+export function resolveChannelHistoryDateRange(
+  query: Record<string, unknown>,
+  scope: 'active' | 'history',
+  channel: StaffOrderChannel,
+): TableHistoryDateRange | null {
+  if (scope !== 'history') return null;
+  if (channel !== 'table' && channel !== 'delivery') return null;
+  return resolveHistoryDateRangeFromQuery(query, venueTodayIsoDate());
+}
+
+/**
  * Unified History (channel=all) always has an explicit date window.
  * Defaults to venue-today when the client omits dates.
  */
@@ -118,10 +132,66 @@ export function resolveUnifiedHistoryDateRange(
 }
 
 /**
+ * Default max inclusive calendar days for unified History (Express frozen →
+ * BFF date-scoped collect/merge). Override with STAFF_HISTORY_MAX_RANGE_DAYS.
+ */
+export const UNIFIED_HISTORY_MAX_RANGE_DAYS_DEFAULT = 30;
+
+/**
+ * Resolved max History window. Configurable so ops can tighten later without
+ * a code change (e.g. set STAFF_HISTORY_MAX_RANGE_DAYS=7).
+ */
+export function resolveUnifiedHistoryMaxRangeDays(): number {
+  const raw = process.env.STAFF_HISTORY_MAX_RANGE_DAYS;
+  if (raw == null || String(raw).trim() === '') {
+    return UNIFIED_HISTORY_MAX_RANGE_DAYS_DEFAULT;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) {
+    return UNIFIED_HISTORY_MAX_RANGE_DAYS_DEFAULT;
+  }
+  // Hard ceiling avoids accidental huge env values.
+  return Math.min(90, Math.floor(n));
+}
+
+/** @deprecated Prefer resolveUnifiedHistoryMaxRangeDays() for runtime config. */
+export const UNIFIED_HISTORY_MAX_RANGE_DAYS =
+  UNIFIED_HISTORY_MAX_RANGE_DAYS_DEFAULT;
+
+/**
  * Max Express pages (limit 100) per channel when collecting a date-scoped
  * unified history window. Hitting this with more pages remaining → explicit error.
+ * 50 × 100 = 5000 rows/channel ceiling inside an allowed date window.
  */
 export const UNIFIED_HISTORY_MAX_SCAN_PAGES = 50;
+
+/** Inclusive day count for YYYY-MM-DD range (same day → 1). */
+export function inclusiveHistoryDayCount(
+  dateFrom: string,
+  dateTo: string,
+): number {
+  const fromMs = Date.parse(`${dateFrom}T00:00:00Z`);
+  const toMs = Date.parse(`${dateTo}T00:00:00Z`);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return Number.POSITIVE_INFINITY;
+  const from = Math.min(fromMs, toMs);
+  const to = Math.max(fromMs, toMs);
+  return Math.floor((to - from) / 86_400_000) + 1;
+}
+
+export function isUnifiedHistoryDateRangeAllowed(
+  range: TableHistoryDateRange,
+  maxDays: number = resolveUnifiedHistoryMaxRangeDays(),
+): boolean {
+  return inclusiveHistoryDayCount(range.dateFrom, range.dateTo) <= maxDays;
+}
+
+/** Staff-facing copy for History window/volume validation (never expose internals). */
+export function unifiedHistoryPeriodTooLargeMessage(locale: 'en' | 'ar'): string {
+  if (locale === 'ar') {
+    return 'الفترة المحددة كبيرة جداً للتحميل. اختر نطاقاً أقصر أو استخدم البحث للعثور على طلبات محددة.';
+  }
+  return 'This period is too large to load. Choose a shorter date range or use search to find specific orders.';
+}
 
 export function entryCreatedAtIsoDate(
   entry: StaffPresentedOrderEntry,
